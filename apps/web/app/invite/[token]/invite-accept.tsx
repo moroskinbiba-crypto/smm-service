@@ -1,29 +1,26 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '../../../lib/supabase/client';
+import { workspaceRequest } from '../../../lib/workspace-api';
 
 export default function InviteAccept({ token }: { token: string }) {
-  const supabase = createClient();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [accepted, setAccepted] = useState(false);
 
   async function accept() {
-    setBusy(true);
-    setMessage('');
-    const { data, error } = await supabase.rpc('accept_workspace_invite', { p_token: token });
-    if (error) {
-      setMessage(error.message);
+    setBusy(true); setMessage('');
+    try {
+      const result = await workspaceRequest<{ workspace?: unknown }>('accept-invite', { token });
+      if (result.workspace) {
+        setAccepted(true);
+        window.setTimeout(() => window.location.assign('/'), 600);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не удалось принять приглашение');
+    } finally {
       setBusy(false);
-      return;
     }
-    const row = Array.isArray(data) ? data[0] : data;
-    if (row) {
-      setAccepted(true);
-      window.setTimeout(() => window.location.assign('/'), 600);
-    }
-    setBusy(false);
   }
 
   return (
