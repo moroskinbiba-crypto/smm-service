@@ -1,5 +1,8 @@
 'use client';
-import { useState } from 'react';
+
+import { useEffect, useState } from 'react';
+import { AppShell } from './components/app-shell';
+import { workspaceRequest } from '../lib/workspace-api';
 
 const networks = [
   { id: 'telegram', name: 'Telegram', icon: '✈️' },
@@ -10,30 +13,39 @@ const networks = [
 ];
 
 export default function Home() {
-  const [theme, setTheme] = useState<'light'|'dark'>('light');
   const [selected, setSelected] = useState<string[]>(['telegram', 'vk']);
+  const [workspaceName, setWorkspaceName] = useState('Рабочее пространство');
 
-  const toggle = (id: string) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  useEffect(() => {
+    void workspaceRequest<{ workspace?: { workspace_name?: string } }>('get-workspace').then(result => {
+      if (result.workspace?.workspace_name) setWorkspaceName(result.workspace.workspace_name);
+    }).catch(() => undefined);
+  }, []);
 
-  return <main className={theme === 'dark' ? 'shell dark' : 'shell'}>
-    <header className="topbar">
-      <div className="brand"><span className="brand-mark">S</span><span>SMM Service</span></div>
-      <button className="theme" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '☾' : '☀'} Тема</button>
-    </header>
-    <section className="hero">
-      <div><div className="eyebrow">MVP</div><h1>Публикуй один раз.<br/>Рассылай везде.</h1><p>Единая очередь публикаций для Telegram, VK, MAX и Одноклассников.</p></div>
-      <div className="status"><span className="dot"/>Сервис готов к подключению</div>
-    </section>
-    <section className="grid">
-      <div className="card composer">
-        <div className="card-head"><h2>Новая публикация</h2><span>Черновик</span></div>
-        <textarea placeholder="Напишите текст публикации..." />
-        <div className="media">＋ Добавить фото или видео</div>
-        <div className="targets"><h3>Площадки</h3>{networks.map(n => <button key={n.id} onClick={() => !n.muted && toggle(n.id)} className={selected.includes(n.id) ? 'network active' : 'network'} disabled={n.muted}><b>{n.icon}</b>{n.name}{n.muted && <small>позже</small>}</button>)}</div>
-        <div className="schedule"><div><label>Дата</label><input type="date" /></div><div><label>Время</label><input type="time" /></div></div>
-        <button className="primary">Запланировать публикацию</button>
-      </div>
-      <aside className="card queue"><div className="card-head"><h2>Очередь</h2><span>Сегодня</span></div><div className="empty">Пока нет запланированных публикаций.<br/><span>Создайте первую — она появится здесь.</span></div></aside>
-    </section>
-  </main>;
+  const toggle = (id: string) => setSelected(current => current.includes(id) ? current.filter(x => x !== id) : [...current, id]);
+
+  return (
+    <AppShell active="plan">
+      <section className="page-section">
+        <div className="page-heading">
+          <div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Здесь будет календарь запланированных и уже опубликованных материалов.</p></div>
+          <button className="plus-button" type="button">＋</button>
+        </div>
+        <section className="card calendar-preview">
+          <div className="calendar-toolbar"><div><strong>Октябрь 2026</strong><span>Сегодня</span></div><div className="calendar-mode"><button className="secondary">Месяц</button><button className="secondary">Неделя</button></div></div>
+          <div className="calendar-grid">
+            {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
+            {Array.from({ length: 35 }, (_, index) => <div className="calendar-cell" key={index}>{index < 31 && <span>{index + 1}</span>}{index === 5 && <div className="calendar-post mock-post">Новая публикация</div>}{index === 12 && <div className="calendar-post mock-post">Анонс мероприятия</div>}</div>)}
+          </div>
+        </section>
+        <section className="card quick-composer">
+          <div className="card-head"><h2>Быстрый просмотр редактора</h2><span>Скоро подключим сохранение</span></div>
+          <textarea placeholder="Введите текст публикации…" />
+          <div className="media">＋ Добавить фото или видео</div>
+          <div className="targets"><h3>Площадки</h3>{networks.map(network => <button key={network.id} onClick={() => !network.muted && toggle(network.id)} className={selected.includes(network.id) ? 'network active' : 'network'} disabled={network.muted}><b>{network.icon}</b>{network.name}{network.muted && <small>позже</small>}</button>)}</div>
+          <div className="schedule"><div><label>Дата</label><input type="date" /></div><div><label>Время</label><input type="time" /></div></div>
+        </section>
+      </section>
+    </AppShell>
+  );
 }
