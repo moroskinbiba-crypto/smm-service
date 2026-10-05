@@ -1,32 +1,42 @@
-# SMM Service MVP
+# SMM Service
 
-Платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram заложен как следующий адаптер.
+Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram закладывается как следующий адаптер.
 
-## Стек
-- Web: Next.js + TypeScript
-- API/worker: FastAPI + Python
-- DB/Auth/Storage: Supabase (PostgreSQL)
-- Deployment: Vercel (web) + Render (API/worker)
-- Queue: Redis/Render Key Value
+## Текущая архитектура
+- Web: Next.js + TypeScript на Vercel
+- Auth/DB/Storage/Edge Functions: Supabase
+- Scheduler: Supabase pg_cron + pg_net
+- Секреты токенов соцсетей: отдельная серверная таблица + шифрование через pgcrypto и ключ в Supabase Vault
+- Рабочие пространства: workspace + members, чтобы позже добавить команды и роли
 
-## Первый этап
+## Основные сущности
+- profiles
+- workspaces
+- workspace_members
+- social_accounts
+- social_account_secrets
+- posts
+- post_targets
+- publication_logs
+
+## Статусы
+Пост: draft / scheduled / publishing / partially_published / published / failed / canceled.
+
+Цель публикации: pending / publishing / published / failed / waiting / canceled.
+
+## Безопасность
+- Клиенты не получают таблицу секретов соцсетей.
+- Внутренние SECURITY DEFINER функции закрыты для anon/authenticated и предназначены для service_role.
+- RLS изолирует рабочие пространства.
+- Медиа хранится в приватном Storage bucket media.
+- Scheduler защищён отдельным внутренним ключом.
+
+## MVP
 1. Регистрация и вход
-2. Подключение социальных аккаунтов
-3. Создание публикации
-4. Выбор нескольких площадок
-5. Планирование даты и времени
-6. Очередь публикаций
-7. Автоматическая публикация
-8. История, статусы и ошибки
-9. Переключение светлой/тёмной темы
+2. Рабочее пространство
+3. Подключение Telegram, VK, MAX и ОК
+4. Создание и планирование публикаций
+5. Очередь, retry и история
+6. Светлая/тёмная тема
 
-AI в MVP пока не включён.
-
-## Архитектура
-Каждая соцсеть реализуется отдельным adapter с единым интерфейсом publish().
-Секреты и токены не хранятся в коде.
-
-## Deployment
-- Vercel — веб-приложение
-- Render — FastAPI API + background worker
-- Supabase — PostgreSQL, Auth, Storage
+AI-функции пока не включены.
