@@ -1,44 +1,34 @@
-# Архитектура
+# Архитектура SMM Service
 
-## Контур
+## Production
+- Vercel: Next.js web app.
+- Supabase Auth: регистрация, вход, сессии.
+- Supabase PostgreSQL: workspaces, accounts, posts, targets, logs.
+- Supabase Storage: приватная медиатека.
+- Supabase Edge Functions: серверные операции и scheduler.
+- pg_cron + pg_net: периодический запуск scheduler раз в минуту.
+- Supabase Vault: секреты и ключ шифрования токенов.
+
+## Поток публикации
+
 User
-→ Next.js / Vercel
-→ Supabase Auth / Postgres / Storage
-→ Edge Function
-→ Telegram / VK / MAX / Одноклассники
+  -> Next.js
+  -> Supabase Auth / Postgres / Storage
+  -> scheduled post
+  -> pg_cron
+  -> publish-scheduled Edge Function
+  -> platform adapter
+  -> Telegram / VK / MAX / Одноклассники
 
-## Планировщик
-pg_cron запускается раз в минуту и вызывает run_scheduler_http().
-Он отправляет внутренний запрос в Edge Function publish-scheduled.
+## Безопасность
+- Пользовательские данные изолированы workspace-based RLS.
+- API tokens соцсетей не хранятся в открытом виде в social_accounts.
+- Токены шифруются server-side через Vault key + pgcrypto.
+- Таблица social_account_secrets закрыта RLS.
+- Внутренние SECURITY DEFINER функции недоступны anon/authenticated.
+- Scheduler использует отдельный cron token.
+- Media bucket приватный.
+- Instagram заложен как отдельная интеграция второго этапа.
 
-Сейчас функция выполняет безопасный heartbeat и считает отложенные цели. Она не публикует контент в соцсети до подключения реальных адаптеров.
-
-## Данные
-Workspace
-├── members
-├── social_accounts
-├── posts
-│   └── post_targets
-└── media
-
-Секреты аккаунтов вынесены в social_account_secrets. Клиентские RLS-политики не дают им доступ.
-
-## Очередь и retry
-post_targets:
-- pending
-- publishing
-- published
-- failed
-- waiting
-- canceled
-
-После ошибки complete_post_target() планирует повтор с backoff до пяти попыток.
-
-## Интеграции
-Для каждой площадки будет отдельный адаптер с единой логикой:
-- validate_connection()
-- publish_text()
-- publish_media()
-- get_target_info()
-
-Instagram — следующий этап.
+## Важное состояние
+Scheduler существует и запускается раз в минуту, но disabled=true до подключения реальных social adapters. Это предотвращает ложное выставление задач в publishing.
