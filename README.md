@@ -1,42 +1,34 @@
 # SMM Service
 
-Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram закладывается как следующий адаптер.
+Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram — следующим этапом.
 
-## Текущая архитектура
-- Web: Next.js + TypeScript на Vercel
-- Auth/DB/Storage/Edge Functions: Supabase
-- Scheduler: Supabase pg_cron + pg_net
-- Секреты токенов соцсетей: отдельная серверная таблица + шифрование через pgcrypto и ключ в Supabase Vault
-- Рабочие пространства: workspace + members, чтобы позже добавить команды и роли
-
-## Основные сущности
-- profiles
-- workspaces
-- workspace_members
-- social_accounts
-- social_account_secrets
-- posts
-- post_targets
-- publication_logs
-
-## Статусы
-Пост: draft / scheduled / publishing / partially_published / published / failed / canceled.
-
-Цель публикации: pending / publishing / published / failed / waiting / canceled.
-
-## Безопасность
-- Клиенты не получают таблицу секретов соцсетей.
-- Внутренние SECURITY DEFINER функции закрыты для anon/authenticated и предназначены для service_role.
-- RLS изолирует рабочие пространства.
-- Медиа хранится в приватном Storage bucket media.
-- Scheduler защищён отдельным внутренним ключом.
+## Production architecture
+- Web: Next.js on Vercel
+- Auth/DB/Storage/Functions: Supabase
+- Scheduler: pg_cron + pg_net + Supabase Edge Function
+- Secrets: Supabase Vault
+- Social integrations: отдельные platform adapters
 
 ## MVP
 1. Регистрация и вход
 2. Рабочее пространство
-3. Подключение Telegram, VK, MAX и ОК
-4. Создание и планирование публикаций
-5. Очередь, retry и история
-6. Светлая/тёмная тема
+3. Подключение соцсетей
+4. Создание публикации
+5. Медиа
+6. Планирование
+7. Очередь
+8. Автопубликация
+9. История и ошибки
+10. Светлая/тёмная тема
 
-AI-функции пока не включены.
+AI пока не входит в MVP.
+
+## Security
+- Workspace-based RLS
+- Private Storage
+- Encrypted social tokens
+- Server-only secrets
+- Protected scheduler
+
+## Current status
+Инфраструктура и база подготовлены. Реальные API-интеграции соцсетей и полноценный фронтенд ещё в разработке.
