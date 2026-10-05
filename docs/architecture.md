@@ -1,22 +1,44 @@
-# Архитектура MVP
+# Архитектура
 
-## Поток публикации
-User -> Web -> API -> PostgreSQL
-                         |
-                         +-> scheduled_posts
-                                 |
-                                 v
-                              worker
-                       +---------+----------+
-                       |         |          |
-                    Telegram    VK       MAX / OK
+## Контур
+User
+→ Next.js / Vercel
+→ Supabase Auth / Postgres / Storage
+→ Edge Function
+→ Telegram / VK / MAX / Одноклассники
 
-## Принцип
-Каждая площадка реализуется как отдельный adapter с единой функцией publish().
-Сервис хранит собственный статус: draft / scheduled / publishing / published / failed.
+## Планировщик
+pg_cron запускается раз в минуту и вызывает run_scheduler_http().
+Он отправляет внутренний запрос в Edge Function publish-scheduled.
 
-## Безопасность
-- Не хранить пароли социальных сетей.
-- OAuth/access tokens хранить только в зашифрованном виде.
-- Секреты только в environment variables / secret storage.
-- У каждого пользователя изолированные connected accounts и posts.
+Сейчас функция выполняет безопасный heartbeat и считает отложенные цели. Она не публикует контент в соцсети до подключения реальных адаптеров.
+
+## Данные
+Workspace
+├── members
+├── social_accounts
+├── posts
+│   └── post_targets
+└── media
+
+Секреты аккаунтов вынесены в social_account_secrets. Клиентские RLS-политики не дают им доступ.
+
+## Очередь и retry
+post_targets:
+- pending
+- publishing
+- published
+- failed
+- waiting
+- canceled
+
+После ошибки complete_post_target() планирует повтор с backoff до пяти попыток.
+
+## Интеграции
+Для каждой площадки будет отдельный адаптер с единой логикой:
+- validate_connection()
+- publish_text()
+- publish_media()
+- get_target_info()
+
+Instagram — следующий этап.
