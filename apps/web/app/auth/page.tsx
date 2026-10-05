@@ -11,14 +11,24 @@ export default function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
+  function getNext() {
+    const next = new URLSearchParams(window.location.search).get('next');
+    return next && next.startsWith('/') ? next : '/';
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setMessage('');
+    const next = getNext();
 
     const result = mode === 'login'
       ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin + '/auth/callback' } });
+      : await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin + '/auth/callback?next=' + encodeURIComponent(next) },
+        });
 
     setBusy(false);
 
@@ -28,11 +38,11 @@ export default function AuthPage() {
     }
 
     if (mode === 'signup') {
-      setMessage('Регистрация создана. Проверьте почту, если подтверждение email включено.');
+      setMessage('Регистрация создана. Проверьте почту, чтобы подтвердить email.');
       return;
     }
 
-    window.location.assign('/');
+    window.location.assign(next);
   }
 
   return (
