@@ -3,32 +3,20 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { createClient } from '../../lib/supabase/client';
+import { workspaceRequest } from '../../lib/workspace-api';
 
-type Workspace = {
-  workspace_id: string;
-  workspace_name: string;
-  workspace_timezone: string;
-  role: string;
-};
+type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
 
-export function AppShell({
-  active,
-  children,
-}: {
-  active: 'plan' | 'accounts' | 'stats';
-  children: ReactNode;
-}) {
+export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats'; children: ReactNode }) {
   const supabase = createClient();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void supabase.rpc('ensure_workspace').then(({ data, error }) => {
-      if (cancelled) return;
-      const row = Array.isArray(data) ? data[0] : data;
-      if (!error && row) setWorkspace(row as Workspace);
-    });
+    void workspaceRequest<{ workspace?: Workspace }>('bootstrap').then(result => {
+      if (!cancelled && result.workspace) setWorkspace(result.workspace);
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
 
@@ -47,12 +35,8 @@ export function AppShell({
           <Link className={active === 'stats' ? 'nav-link active' : 'nav-link'} href="/stats">Статистика</Link>
         </nav>
         <div className="top-actions">
-          <Link className="workspace-chip" href="/team">
-            <span className="workspace-dot" />{workspace?.workspace_name ?? 'Команда'}
-          </Link>
-          <button className="theme" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
-            {theme === 'light' ? '☾' : '☀'} Тема
-          </button>
+          <Link className="workspace-chip" href="/team"><span className="workspace-dot" />{workspace?.workspace_name ?? 'Команда'}</Link>
+          <button className="theme" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? '☾' : '☀'} Тема</button>
           <button className="profile-button" onClick={signOut}>Выйти</button>
         </div>
       </header>
