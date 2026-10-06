@@ -655,7 +655,7 @@ async function publishPost(ctx: any, postId: string) {
     try {
       const account = await accountRow(ctx.admin, target.social_account_id, ctx.workspace.workspace_id);
       const secret = await getSecret(ctx.admin, account.id);
-      const externalPostId = await publish(account.platform as Platform, secret ?? {}, account.external_id ?? "", post.body ?? "", media as MediaItem[], account.metadata ?? {});
+      const externalPostId = await publish(account.platform as Platform, secret ?? {}, account.external_id ?? "", post.body ?? "", media as MediaItem[], account.metadata ?? {}, target.publication_type || "feed");
       await ctx.admin.from("post_targets").update({
         status: "published",
         external_post_id: externalPostId,
