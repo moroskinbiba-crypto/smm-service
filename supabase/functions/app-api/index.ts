@@ -1042,6 +1042,16 @@ Deno.serve(async (req: Request) => {
           const rawPath = String(body.path || "");
           const prefix = ctx.workspace.workspace_id + "/";
           if (!rawPath.startsWith(prefix)) throw new Error("Недопустимый путь к медиа");
+          const { data: posts, error: postsError } = await ctx.admin.from("posts")
+            .select("id,media")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .limit(5000);
+          if (postsError) throw postsError;
+          const used = (posts ?? []).some((post:any) =>
+            Array.isArray(post.media) && post.media.some((item:any)=>item?.path === rawPath)
+          );
+          if (used) throw new Error("Файл используется в публикации и не может быть удалён из медиатеки");
+
           const { error } = await ctx.admin.storage.from("media").remove([rawPath]);
           if (error) throw error;
           return json({ ok: true });
