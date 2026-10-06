@@ -20,9 +20,7 @@ declare
   v_social_accounts_count integer;
   v_invites_count integer;
 begin
-  if p_user_id is null then
-    raise exception 'User is required';
-  end if;
+  if p_user_id is null then raise exception 'User is required'; end if;
 
   v_hash := extensions.digest(trim(p_token), 'sha256');
 
@@ -49,21 +47,10 @@ begin
       raise exception 'You are already a member of this workspace';
     end if;
 
-    select count(*) into v_member_count
-    from public.workspace_members wm2
-    where wm2.workspace_id = v_current_workspace_id;
-
-    select count(*) into v_posts_count
-    from public.posts p2
-    where p2.workspace_id = v_current_workspace_id;
-
-    select count(*) into v_social_accounts_count
-    from public.social_accounts sa2
-    where sa2.workspace_id = v_current_workspace_id;
-
-    select count(*) into v_invites_count
-    from public.workspace_invites wi2
-    where wi2.workspace_id = v_current_workspace_id;
+    select count(*) into v_member_count from public.workspace_members wm2 where wm2.workspace_id = v_current_workspace_id;
+    select count(*) into v_posts_count from public.posts p2 where p2.workspace_id = v_current_workspace_id;
+    select count(*) into v_social_accounts_count from public.social_accounts sa2 where sa2.workspace_id = v_current_workspace_id;
+    select count(*) into v_invites_count from public.workspace_invites wi2 where wi2.workspace_id = v_current_workspace_id;
 
     if v_current_role <> 'owner'
        or v_current_owner_id <> p_user_id
@@ -75,7 +62,7 @@ begin
     end if;
 
     update public.profiles
-    set workspace_id = null, updated_at = now()
+    set workspace_id = v_workspace_id, updated_at = now()
     where id = p_user_id;
 
     delete from public.workspace_members wm3
@@ -102,7 +89,6 @@ begin
   set used_at = now(), used_by = p_user_id
   where wi4.token_hash = v_hash and wi4.used_at is null;
 
-  return query
-  select v_workspace_id, v_workspace_name, v_workspace_timezone, v_role;
+  return query select v_workspace_id, v_workspace_name, v_workspace_timezone, v_role;
 end;
 $function$;
