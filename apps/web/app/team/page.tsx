@@ -7,7 +7,7 @@ import { createClient } from '../../lib/supabase/client';
 
 type Member = { user_id: string; display_name: string | null; role: string; created_at: string; invited_by: string | null; suspended_at: string | null; suspended_reason: string | null };
 type Invite = { invite_id: string; expires_at: string; used_at: string | null; created_at: string; role: string };
-type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
+type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number };
 
 function roleLabel(role: string) {
   return ({owner:'Владелец',admin:'Администратор',editor:'Редактор',publisher:'Публикатор',approver:'Согласующий',viewer:'Наблюдатель'} as Record<string,string>)[role] ?? role;
@@ -88,12 +88,11 @@ export default function TeamPage() {
     }
   }
 
-  async function suspendMember(member: Member){
-    const next=!member.suspended_at;
-    if(!window.confirm((next?'Отключить':'Включить')+' аккаунт '+(member.display_name||'пользователя')+'?'))return;
+  async function removeMember(member: Member){
+    if(!window.confirm('Удалить '+(member.display_name||'пользователя')+' из команды? Личный профиль и личные данные пользователя останутся.')) return;
     setBusy(true);setMessage('');
-    try{await workspaceRequest('suspend-member',{user_id:member.user_id,suspended:next});await load();}
-    catch(e){setMessage(e instanceof Error?e.message:'Не удалось изменить доступ')}
+    try{await workspaceRequest('remove-member',{user_id:member.user_id});await load();}
+    catch(e){setMessage(e instanceof Error?e.message:'Не удалось удалить участника')}
     finally{setBusy(false)}
   }
 
@@ -107,8 +106,9 @@ export default function TeamPage() {
           <span className="status"><span className="dot" />{roleLabel(workspace?.role ?? 'owner')}</span>
         </div>
         <div className="team-grid">
+          {workspace?.workspace_kind === 'personal' && canInvite && <section className="card"><div className="auth-message">Это личный профиль. Создание первой команды через приглашение автоматически создаст отдельный личный профиль и превратит текущий профиль в командный.</div></section>}
           <section className="card">
-            <div className="card-head"><h2>Участники</h2><span>{members.length}</span></div>
+            <div className="card-head"><h2>Участники</h2><span>{members.length}{workspace?.max_members ? ' / ' + workspace.max_members : ''}</span></div>
             <div className="member-list">
               {members.map(member => <div className="member-row" key={member.user_id}>
   <div className="member-avatar">{(member.display_name ?? 'П').slice(0, 1).toUpperCase()}</div>
@@ -120,7 +120,7 @@ export default function TeamPage() {
     <option value="approver">Согласующий</option>
     <option value="viewer">Наблюдатель</option>
   </select>}
-  {canInvite && member.role !== 'owner' && member.invited_by === currentUserId && <button className={member.suspended_at?'secondary':'secondary danger-button'} disabled={busy} onClick={()=>void suspendMember(member)}>{member.suspended_at?'Включить':'Отключить'}</button>}
+  {canInvite && member.role !== 'owner' && <button className="secondary danger-button" disabled={busy} onClick={()=>void removeMember(member)}>Удалить из команды</button>}
 </div>)}
               {!members.length && <div className="empty small-empty">Участников пока нет.</div>}
             </div>
