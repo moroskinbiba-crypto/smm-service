@@ -147,3 +147,19 @@
 .ai-popover select{padding:10px;border:1px solid #dfe3ea;border-radius:10px;background:transparent;color:inherit;font:inherit}
 .dark .ai-popover select{border-color:#353945}
 .ai-popover .primary{margin-top:0}
+
+.stats-top-block{margin-bottom:20px}
+.stats-positive{color:#1a7b49}
+.stats-negative{color:#b23b3b}
+.dark .stats-positive{color:#91e0b4}
+.dark .stats-negative{color:#ffb3b3}
+.stats-top-posts{margin-top:20px}
+.stats-top-list{display:grid;gap:7px;margin-top:14px}
+.stats-top-row{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border-top:1px solid #e6e9ef}
+.dark .stats-top-row{border-color:#2a2e38}
+.stats-rank{width:30px;height:30px;display:grid;place-items:center;border-radius:9px;background:#eef1f5;font-size:12px;font-weight:900}
+.dark .stats-rank{background:#242832}
+.stats-top-row>div{display:grid;gap:4px;min-width:0}
+.stats-top-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats-top-row small{font-size:10px;opacity:.55}
+@media(max-width:700px){.stats-top-row{grid-template-columns:30px minmax(0,1fr)}.stats-top-row>strong{grid-column:2}}
