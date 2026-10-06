@@ -264,6 +264,41 @@ async function loadPosts(ctx: any, body: any) {
   return { posts, workspace: ctx.workspace };
 }
 
+function randomToken(length = 32) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function createOAuthState(ctx: any, provider: string) {
+  const state = randomToken(24);
+  const { error } = await ctx.admin.from("oauth_states").insert({
+    user_id: ctx.user.id,
+    workspace_id: ctx.workspace.workspace_id,
+    provider,
+    state,
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  });
+  if (error) throw error;
+  return state;
+}
+
+async function consumeOAuthState(ctx: any, provider: string, state: string) {
+  const { data, error } = await ctx.admin.from("oauth_states")
+    .select("id")
+    .eq("state", state)
+    .eq("provider", provider)
+    .eq("user_id", ctx.user.id)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("OAuth-сеанс недействителен или истёк");
+  await ctx.admin.from("oauth_states").delete().eq("id", data.id);
+}
+
+async function requireOAuthConfig(key: string, value: string) {
+  if (!value) throw new Error("OAuth не настроен: отсутствует " + key + " в секретах Edge Function");
+}
+
 async function runAutomations(ctx: any, triggerType: string, title: string, body: string, notificationType: string) {
   const { data: rules, error } = await ctx.admin.from("automation_rules")
     .select("id,trigger_type,action_type,enabled")
@@ -896,6 +931,217 @@ Deno.serve(async (req: Request) => {
             .order("display_name", { ascending: true });
           if (error) throw error;
           return json({ ok: true, accounts: data ?? [] });
+        }
+      case "oauth-vk-start":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const appId = Deno.env.get("VK_APP_ID") ?? "";
+          const redirectUri = Deno.env.get("VK_REDIRECT_URI") ?? "";
+          await requireOAuthConfig("VK_APP_ID", appId);
+          await requireOAuthConfig("VK_REDIRECT_URI", redirectUri);
+          const state = await createOAuthState(ctx, "vk");
+          const params = new URLSearchParams({
+            client_id: appId,
+            display: "page",
+            redirect_uri: redirectUri,
+            scope: "groups,wall,photos,video,stories,offline",
+            response_type: "code",
+            v: "5.199",
+            state,
+          });
+          return json({ ok: true, provider: "vk", url: "https://oauth.vk.com/authorize?" + params.toString() });
+        }
+      case "oauth-vk-complete":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const code = String(body.code || "");
+          const state = String(body.state || "");
+          if (!code || !state) throw new Error("VK OAuth не вернул code/state");
+          await consumeOAuthState(ctx, "vk", state);
+          const appId = Deno.env.get("VK_APP_ID") ?? "";
+          const appSecret = Deno.env.get("VK_APP_SECRET") ?? "";
+          const redirectUri = Deno.env.get("VK_REDIRECT_URI") ?? "";
+          await requireOAuthConfig("VK_APP_ID", appId);
+          await requireOAuthConfig("VK_APP_SECRET", appSecret);
+          await requireOAuthConfig("VK_REDIRECT_URI", redirectUri);
+
+          const tokenResponse = await fetch("https://oauth.vk.com/access_token?" + new URLSearchParams({
+            client_id: appId,
+            client_secret: appSecret,
+            redirect_uri: redirectUri,
+            code,
+          }).toString());
+          const tokenText = await tokenResponse.text();
+          let tokenData: any = {};
+          try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch { tokenData = {}; }
+          if (!tokenResponse.ok || tokenData.error) throw new Error(tokenData.error_description || tokenData.error || "VK не выдал токен");
+
+          const accessToken = String(tokenData.access_token || "");
+          if (!accessToken) throw new Error("VK не выдал access token");
+          const groups = await jsonResponseForAppApi("https://api.vk.com/method/groups.get?" + new URLSearchParams({
+            access_token: accessToken,
+            v: "5.199",
+            filter: "admin",
+            extended: "1",
+            fields: "name,screen_name,photo_100",
+            count: "500",
+          }).toString());
+
+          return json({
+            ok: true,
+            provider: "vk",
+            access_token: accessToken,
+            groups: Array.isArray(groups.response?.items) ? groups.response.items.map((group:any)=>({
+              id: String(group.id),
+              name: group.name,
+              screen_name: group.screen_name ?? null,
+              photo_100: group.photo_100 ?? null,
+            })) : [],
+          });
+        }
+      case "oauth-meta-start":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const appId = Deno.env.get("META_APP_ID") ?? "";
+          const redirectUri = Deno.env.get("META_REDIRECT_URI") ?? "";
+          await requireOAuthConfig("META_APP_ID", appId);
+          await requireOAuthConfig("META_REDIRECT_URI", redirectUri);
+          const state = await createOAuthState(ctx, "meta");
+          const params = new URLSearchParams({
+            client_id: appId,
+            redirect_uri: redirectUri,
+            response_type: "code",
+            state,
+            scope: "pages_show_list,instagram_basic,instagram_content_publish,pages_read_engagement",
+          });
+          return json({ ok: true, provider: "meta", url: "https://www.facebook.com/v25.0/dialog/oauth?" + params.toString() });
+        }
+      case "oauth-meta-complete":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const code = String(body.code || "");
+          const state = String(body.state || "");
+          if (!code || !state) throw new Error("Meta OAuth не вернул code/state");
+          await consumeOAuthState(ctx, "meta", state);
+          const appId = Deno.env.get("META_APP_ID") ?? "";
+          const appSecret = Deno.env.get("META_APP_SECRET") ?? "";
+          const redirectUri = Deno.env.get("META_REDIRECT_URI") ?? "";
+          await requireOAuthConfig("META_APP_ID", appId);
+          await requireOAuthConfig("META_APP_SECRET", appSecret);
+          await requireOAuthConfig("META_REDIRECT_URI", redirectUri);
+
+          const tokenResponse = await fetch("https://graph.facebook.com/v25.0/oauth/access_token?" + new URLSearchParams({
+            client_id: appId,
+            client_secret: appSecret,
+            redirect_uri: redirectUri,
+            code,
+          }).toString());
+          const tokenText = await tokenResponse.text();
+          let tokenData: any = {};
+          try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch { tokenData = {}; }
+          if (!tokenResponse.ok || tokenData.error) throw new Error(tokenData.error?.message || tokenData.error_description || "Meta не выдал токен");
+
+          const userToken = String(tokenData.access_token || "");
+          if (!userToken) throw new Error("Meta не выдал access token");
+
+          const pages = await jsonResponseForAppApi("https://graph.facebook.com/v25.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=" + encodeURIComponent(userToken));
+          const accounts: any[] = [];
+          for (const page of Array.isArray(pages.data) ? pages.data : []) {
+            if (!page.instagram_business_account?.id || !page.access_token) continue;
+            const ig = await jsonResponseForAppApi("https://graph.facebook.com/v25.0/" + encodeURIComponent(page.instagram_business_account.id) + "?fields=id,username,name,profile_picture_url,account_type&access_token=" + encodeURIComponent(page.access_token));
+            accounts.push({
+              page_id: String(page.id),
+              page_name: page.name,
+              page_access_token: String(page.access_token),
+              instagram_id: String(ig.id),
+              instagram_username: ig.username || null,
+              instagram_name: ig.name || null,
+              profile_picture_url: ig.profile_picture_url || null,
+              account_type: ig.account_type || null,
+            });
+          }
+
+          return json({ ok: true, provider: "meta", accounts });
+        }
+      case "oauth-connect-vk":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const accessToken = String(body.access_token || "").trim();
+          const groupId = String(body.group_id || "").trim();
+          if (!accessToken || !groupId) throw new Error("Не выбран аккаунт VK");
+          const metadata = { oauth: true, oauth_provider: "vk" };
+          const { data: account, error: accountError } = await ctx.admin.from("social_accounts").insert({
+            user_id: ctx.user.id,
+            workspace_id: ctx.workspace.workspace_id,
+            platform: "vk",
+            external_id: groupId,
+            display_name: body.group_name || null,
+            username: body.group_screen_name ? "@" + String(body.group_screen_name).replace(/^@/, "") : null,
+            status: "pending",
+            metadata,
+          }).select("id").single();
+          if (accountError) throw accountError;
+          try {
+            await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
+            const secret = await getSecret(ctx.admin, account.id);
+            const checked = await healthcheck("vk", secret ?? {}, groupId, metadata);
+            const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
+              status: "connected",
+              last_error: null,
+              display_name: body.group_name || checked.display_name || null,
+              username: body.group_screen_name ? "@" + String(body.group_screen_name).replace(/^@/, "") : checked.username || null,
+              updated_at: new Date().toISOString(),
+            }).eq("id", account.id).select("*").single();
+            if (updateError) throw updateError;
+            return json({ ok: true, account: updated });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.admin.from("social_accounts").update({ status: "error", last_error: message }).eq("id", account.id);
+            throw new Error(message);
+          }
+        }
+      case "oauth-connect-meta":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const accessToken = String(body.page_access_token || "").trim();
+          const instagramId = String(body.instagram_id || "").trim();
+          if (!accessToken || !instagramId) throw new Error("Не выбран Instagram-аккаунт");
+          const metadata = {
+            oauth: true,
+            oauth_provider: "meta",
+            page_id: body.page_id ? String(body.page_id) : null,
+            page_name: body.page_name ? String(body.page_name) : null,
+            account_type: body.account_type ? String(body.account_type) : null,
+          };
+          const { data: account, error: accountError } = await ctx.admin.from("social_accounts").insert({
+            user_id: ctx.user.id,
+            workspace_id: ctx.workspace.workspace_id,
+            platform: "instagram",
+            external_id: instagramId,
+            display_name: body.instagram_name || body.instagram_username || "Instagram",
+            username: body.instagram_username ? "@" + String(body.instagram_username).replace(/^@/, "") : null,
+            status: "pending",
+            metadata,
+          }).select("id").single();
+          if (accountError) throw accountError;
+          try {
+            await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
+            const secret = await getSecret(ctx.admin, account.id);
+            const checked = await healthcheck("instagram", secret ?? {}, instagramId, metadata);
+            const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
+              status: "connected",
+              last_error: null,
+              display_name: body.instagram_name || checked.display_name || null,
+              username: body.instagram_username ? "@" + String(body.instagram_username).replace(/^@/, "") : checked.username || null,
+              updated_at: new Date().toISOString(),
+            }).eq("id", account.id).select("*").single();
+            if (updateError) throw updateError;
+            return json({ ok: true, account: updated });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.admin.from("social_accounts").update({ status: "error", last_error: message }).eq("id", account.id);
+            throw new Error(message);
+          }
         }
       case "connect-account":
         if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
