@@ -13,6 +13,8 @@ type Summary = {
   likes: number;
   comments: number;
   reposts: number;
+  clicks: number;
+  ctr: number;
   engagement: number;
   engagement_rate: number;
   avg_views_per_post: number;
@@ -29,6 +31,7 @@ type Platform = {
   likes: number;
   comments: number;
   reposts: number;
+  clicks: number;
   engagement: number;
   engagement_rate: number;
   avg_views: number;
@@ -43,6 +46,7 @@ type Daily = {
   likes: number;
   comments: number;
   reposts: number;
+  clicks: number;
   engagement: number;
 };
 
@@ -61,24 +65,34 @@ function percent(value: number) {
   return value.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + '%';
 }
 
+type Comparison = { posts:number; published:number; views:number; likes:number; comments:number; reposts:number; clicks:number };
+type TopPost = { post_id:string; preview:string; views:number; likes:number; comments:number; reposts:number; clicks:number; score:number };
+type BestHour = { hour:number; published:number; views:number; engagement:number };
+
 export default function StatsPage() {
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [daily, setDaily] = useState<Daily[]>([]);
+  const [comparison, setComparison] = useState<Comparison|null>(null);
+  const [topPosts, setTopPosts] = useState<TopPost[]>([]);
+  const [bestHours, setBestHours] = useState<BestHour[]>([]);
   const [msg, setMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
     const end = new Date();
     const start = new Date(Date.now() - Number(period) * 86400000);
-    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[] }>(
+    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[] }>(
       'stats',
       { from: start.toISOString(), to: end.toISOString() },
     );
     setSummary(r.summary);
     setPlatforms(r.by_platform ?? []);
     setDaily(r.daily ?? []);
+    setComparison(r.comparison ?? null);
+    setTopPosts(r.top_posts ?? []);
+    setBestHours(r.best_hours ?? []);
   }
 
   useEffect(() => {
@@ -110,6 +124,8 @@ export default function StatsPage() {
     ['Лайки', number(summary.likes), 'реакции'],
     ['Комментарии', number(summary.comments), 'комментарии'],
     ['Репосты', number(summary.reposts), 'репосты'],
+    ['Клики', number(summary.clicks), 'клики по доступным метрикам'],
+    ['CTR', percent(summary.ctr), 'клики / просмотры'],
     ['Вовлечённость', number(summary.engagement), 'лайки + комментарии + репосты'],
     ['ER по просмотрам', percent(summary.engagement_rate), 'вовлечённость / просмотры'],
     ['Средние просмотры', number(summary.avg_views_per_post), 'на опубликованный target'],
@@ -236,7 +252,25 @@ export default function StatsPage() {
           </section>
         </section>
 
+        <section className="card stats-top-posts">
+          <div className="card-head"><h2>Лучшие публикации</h2><span>по просмотрам и вовлечённости</span></div>
+          <div className="stats-top-list">
+            {topPosts.map((post,index)=><div className="stats-top-row" key={post.post_id}>
+              <span className="stats-rank">{index+1}</span>
+              <div><strong>{post.preview}</strong><small>{number(post.views)} просмотров · {number(post.likes)} лайков · {number(post.comments)} комментариев · {number(post.reposts)} репостов</small></div>
+              <strong>{number(post.score)}</strong>
+            </div>)}
+            {!topPosts.length&&<div className="empty small-empty">Недостаточно публикаций для рейтинга.</div>}
+          </div>
+        </section>
+
         <div className="stats-actions">
+          <button className="secondary" onClick={() => {
+            const rows = [['Период','Публикации','Опубликовано','Просмотры','Лайки','Комментарии','Репосты','Клики','ER','CTR'],[period,summary?.posts??0,summary?.published??0,summary?.views??0,summary?.likes??0,summary?.comments??0,summary?.reposts??0,summary?.clicks??0,summary?.engagement_rate??0,summary?.ctr??0]];
+            const csv = rows.map(row=>row.map(value=>String(value).replace(/"/g,'""')).map(value=>'"'+value+'"').join(',')).join('\n');
+            const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+            const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='smm-report.csv'; a.click(); URL.revokeObjectURL(url);
+          }}>Экспорт CSV</button>
           <button className="secondary" disabled={refreshing} onClick={() => void refreshMetrics()}>
             {refreshing ? 'Обновляем…' : 'Обновить метрики площадок'}
           </button>
