@@ -34,6 +34,7 @@ export default function AccountsPage(){
   const [vkToken,setVkToken]=useState('');
   const [metaCandidates,setMetaCandidates]=useState<MetaCandidate[]>([]);
   const [oauthProvider,setOauthProvider]=useState<'vk'|'meta'|null>(null);
+  const [maxConnect,setMaxConnect]=useState<{code:string;expires_at:string;bot_username:string;instructions:string}|null>(null);
 
   async function load(){const r=await appRequest<{accounts:SocialAccount[]}>('list-accounts');setAccounts(r.accounts??[]);return r.accounts??[]}
   async function refreshHealth(list:SocialAccount[]){const targets=list.filter(a=>a.status==='connected');if(!targets.length)return;const checked=await Promise.all(targets.map(a=>appRequest<{account:SocialAccount}>('check-account',{account_id:a.id}).then(x=>x.account).catch(()=>a)));setAccounts(v=>v.map(a=>checked.find(x=>x.id===a.id)??a))}
@@ -126,12 +127,12 @@ export default function AccountsPage(){
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить Instagram')}finally{setBusy(false)}
   }
 
-  async function connectMaxServiceBot(){
+  async function startMaxServiceBot(){
     setBusy(true);setMsg('');
     try{
-      const r=await appRequest<{account:SocialAccount}>('max-connect-service-bot',{chat_id:externalId});
-      setAccounts(v=>[...v,r.account]);setExternalId('');
-    }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить MAX')}finally{setBusy(false)}
+      const r=await appRequest<{code:string;expires_at:string;bot_username:string;instructions:string}>('max-service-start');
+      setMaxConnect(r);
+    }catch(e){setMsg(e instanceof Error?e.message:'Не удалось запустить подключение MAX')}finally{setBusy(false)}
   }
 
   async function check(id:string){try{const r=await appRequest<{account:SocialAccount}>('check-account',{account_id:id});setAccounts(v=>v.map(a=>a.id===id?r.account:a))}catch(e){setMsg(e instanceof Error?e.message:'Проверка не удалась')}}
@@ -200,12 +201,12 @@ export default function AccountsPage(){
           </>}
 
           {platform==='max'&&maxMode==='service_bot'&&<div className="max-service-form">
-            <p className="section-copy">Добавьте наш служебный MAX-бот в нужный канал как администратора. После этого вставьте chat_id канала.</p>
-            <ol className="max-steps"><li>Добавьте служебного бота в канал.</li><li>Назначьте его администратором с правами публикации.</li><li>Вставьте chat_id канала.</li></ol>
-            <label>Chat ID канала<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
-            <button className="primary" disabled={busy||!externalId} onClick={()=>void connectMaxServiceBot()}>{busy?'Проверяем…':'Подключить канал'}</button>
-            <div className="connect-faq-body"><p>Этот способ заработает после настройки служебного MAX-бота в секретах Edge Function. Пользовательский токен здесь не нужен.</p></div>
-          </div>}
+            <p className="section-copy">Добавьте служебного MAX-бота в канал как администратора. Затем отправьте в канале команду с одноразовым кодом — сервис сам увидит channel ID и подключит канал.</p>
+            <ol className="max-steps"><li>Нажмите «Получить код подключения».</li><li>Добавьте служебного бота <b>{maxConnect?.bot_username ? '@'+maxConnect.bot_username.replace(/^@/,'') : 'служебного бота'}</b> в канал и назначьте ему права администратора.</li><li>Отправьте в канале сообщение <b>/connect КОД</b>.</li><li>Через несколько секунд канал появится в списке аккаунтов.</li></ol>
+            <button className="primary" disabled={busy} onClick={()=>void startMaxServiceBot()}>{busy?'Готовим…':'Получить код подключения'}</button>
+            {maxConnect&&<div className="max-connect-code"><strong>Код: {maxConnect.code}</strong><span>Действует до {new Date(maxConnect.expires_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><code>/connect {maxConnect.code}</code><small>{maxConnect.instructions}</small></div>}
+            <div className="connect-faq-body"><p>Этот способ требует один раз настроить служебного MAX-бота и Webhook на стороне сервиса. Пользовательский токен не вводится.</p></div>
+          </div>
 
           {(platform==='vk'||platform==='instagram')&&<details className="connect-faq" open><summary>Как работает вход</summary><div className="connect-faq-body"><p>Сначала открывается отдельное окно авторизации. После входа сервис получает только нужные разрешения, показывает список доступных сообществ/аккаунтов и сохраняет выбранный.</p></div></details>}
 
