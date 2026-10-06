@@ -409,6 +409,31 @@ export async function fetchMetrics(platform: Platform, secret: Secret, externalI
       reposts: Number(post?.reposts?.count ?? 0),
     };
   }
+  if (platform === "instagram") {
+    if (!secret.access_token) throw new Error("Instagram token не указан");
+    const media = await instagramGraph(`${encodeURIComponent(externalPostId)}?fields=like_count,comments_count&access_token=${encodeURIComponent(secret.access_token)}`);
+    let views = 0;
+    let saved = 0;
+    let shares = 0;
+    try {
+      const insights = await instagramGraph(`${encodeURIComponent(externalPostId)}/insights?metric=impressions,reach,saved,shares&access_token=${encodeURIComponent(secret.access_token)}`);
+      for (const item of Array.isArray(insights.data) ? insights.data : []) {
+        const value = Number(item.values?.[0]?.value ?? 0);
+        if (item.name === "impressions" || item.name === "reach") views = Math.max(views, value);
+        if (item.name === "saved") saved = value;
+        if (item.name === "shares") shares = value;
+      }
+    } catch {
+      // Some media types/accounts expose fewer insight metrics.
+    }
+    return {
+      views,
+      likes: Number(media.like_count ?? 0),
+      comments: Number(media.comments_count ?? 0),
+      reposts: shares,
+      saves: saved,
+    };
+  }
   if (platform === "max") {
     if (!secret.access_token) throw new Error("MAX token не указан");
     const data = await jsonResponse("https://platform-api2.max.ru/messages/" + encodeURIComponent(externalPostId), {
