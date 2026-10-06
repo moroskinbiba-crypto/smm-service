@@ -932,6 +932,72 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           return json({ ok: true, accounts: data ?? [] });
         }
+      case "telegram-service-status":
+        {
+          const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+          const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
+          return json({ ok: true, configured: Boolean(token && username), bot_username: username || null });
+        }
+      case "telegram-service-start":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const mode = body.mode === "business" ? "business" : "channel";
+          const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+          const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
+          const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
+          const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+          if (!token || !username) throw new Error("Служебный Telegram-бот ещё не настроен");
+          if (!webhookSecret) throw new Error("TELEGRAM_WEBHOOK_SECRET ещё не настроен");
+          if (!supabaseUrl) throw new Error("SUPABASE_URL не настроен");
+
+          const webhookUrl = (supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl) + "/functions/v1/telegram-webhook";
+          const webhook = await fetch("https://api.telegram.org/bot" + token + "/setWebhook", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              url: webhookUrl,
+              secret_token: webhookSecret,
+              allowed_updates: ["my_chat_member", "channel_post", "message", "business_connection"],
+              drop_pending_updates: false,
+            }),
+          });
+          const webhookBody = await webhook.json().catch(() => ({}));
+          if (!webhook.ok || webhookBody?.ok !== true) {
+            throw new Error("Не удалось настроить Telegram Webhook: " + (webhookBody?.description || "неизвестная ошибка"));
+          }
+
+          const code = randomToken(12).slice(0, 24);
+          const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+          const { error } = await ctx.admin.from("telegram_connection_requests").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            user_id: ctx.user.id,
+            mode,
+            code,
+            expires_at: expiresAt,
+          });
+          if (error) throw error;
+
+          if (mode === "channel") {
+            return json({
+              ok: true,
+              mode,
+              code,
+              expires_at: expiresAt,
+              bot_username: username,
+              instructions: "Добавьте служебного Telegram-бота в нужный канал как администратора с правом публикации, затем отправьте в канале сообщение /connect " + code,
+            });
+          }
+
+          return json({
+            ok: true,
+            mode,
+            code,
+            expires_at: expiresAt,
+            bot_username: username,
+            start_url: "https://t.me/" + username.replace(/^@/, "") + "?start=" + code,
+            instructions: "Откройте ссылку, нажмите Start, затем подключите этого бота в Telegram Business и разрешите управление историями.",
+          });
+        }
       case "max-service-status":
         {
           const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
