@@ -944,6 +944,20 @@ Deno.serve(async (req: Request) => {
           const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
           const username = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
           if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
+          const webhookSecret = Deno.env.get("MAX_WEBHOOK_SECRET") ?? "";
+          const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+          if (supabaseUrl) {
+            const subscriptionBody: Record<string, unknown> = {
+              url: supabaseUrl.replace(/\\/$/, "") + "/functions/v1/max-webhook",
+              update_types: ["bot_added", "bot_removed", "chat_title_changed", "bot_admin_permissions_changed", "message_created"],
+            };
+            if (webhookSecret) subscriptionBody.secret = webhookSecret;
+            await fetch("https://platform-api2.max.ru/subscriptions", {
+              method: "POST",
+              headers: { Authorization: token, "content-type": "application/json" },
+              body: JSON.stringify(subscriptionBody),
+            });
+          }
           const bytes = crypto.getRandomValues(new Uint8Array(12));
           const code = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("").slice(0, 16);
           const { error } = await ctx.admin.from("max_connection_requests").insert({
