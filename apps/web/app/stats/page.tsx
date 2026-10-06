@@ -117,11 +117,11 @@ export default function StatsPage() {
     setRefreshing(true);
     setMsg('');
     try {
-      const r = await appRequest<{ refreshed: number; errors: string[] }>('refresh-metrics');
-      if (r.errors?.length) {
-        setMsg('Обновлено: ' + r.refreshed + '. Ошибки: ' + r.errors.slice(0, 2).join(' · '));
-      }
-      await load();
+      const r = await appRequest<{ queued: number; message?: string }>('refresh-metrics');
+      setMsg((r.message || 'Обновление метрик поставлено в очередь') + ' · задач: ' + r.queued);
+      window.setTimeout(() => {
+        void load().catch(e => setMsg(e instanceof Error ? e.message : 'Не удалось обновить статистику'));
+      }, 2000);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Не удалось обновить метрики');
     } finally {
