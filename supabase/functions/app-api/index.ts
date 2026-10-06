@@ -952,11 +952,15 @@ Deno.serve(async (req: Request) => {
               update_types: ["bot_added", "bot_removed", "chat_title_changed", "bot_admin_permissions_changed", "message_created"],
             };
             if (webhookSecret) subscriptionBody.secret = webhookSecret;
-            await fetch("https://platform-api2.max.ru/subscriptions", {
+            const webhookResponse = await fetch("https://platform-api2.max.ru/subscriptions", {
               method: "POST",
               headers: { Authorization: token, "content-type": "application/json" },
               body: JSON.stringify(subscriptionBody),
             });
+            if (!webhookResponse.ok) {
+              const webhookBody = await webhookResponse.text();
+              throw new Error("MAX Webhook не настроен: HTTP " + webhookResponse.status + " " + webhookBody.slice(0, 300));
+            }
           }
           const bytes = crypto.getRandomValues(new Uint8Array(12));
           const code = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("").slice(0, 16);
