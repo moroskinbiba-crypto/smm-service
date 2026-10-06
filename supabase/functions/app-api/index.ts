@@ -557,12 +557,22 @@ async function sendInboxMessage(ctx: any, threadId: string, body: string) {
   const secret = await getSecret(ctx.admin, account.id);
   let sent: any;
 
+  const { data: latestInbound, error: latestInboundError } = await ctx.admin.from("inbox_messages")
+    .select("metadata")
+    .eq("thread_id", thread.id)
+    .eq("direction", "inbound")
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestInboundError) throw latestInboundError;
+
   if (account.platform === "telegram") {
     sent = await telegramSendInboxReply(secret ?? {}, thread.external_thread_id, text);
   } else if (account.platform === "vk") {
     const parts = thread.external_thread_id.split(":");
     if (parts.length < 3) throw new Error("Не удалось определить VK-пост");
-    sent = await vkSendInboxReply(secret ?? {}, parts[1], parts[2], null, text);
+    const replyTo = latestInbound?.metadata?.vk_comment_id ? String(latestInbound.metadata.vk_comment_id) : null;
+    sent = await vkSendInboxReply(secret ?? {}, parts[1], parts[2], replyTo, text);
   } else if (account.platform === "max") {
     const isComment = thread.thread_type === "comment";
     const postId = thread.external_thread_id.startsWith("max-comment:") ? thread.external_thread_id.replace("max-comment:", "") : null;
