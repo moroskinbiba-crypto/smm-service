@@ -71,19 +71,84 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
         return json({ ok: true, members: data ?? [] });
       }
+      case "set-member-role": {
+        const targetUserId = String(body.user_id || "");
+        const role = typeof body.role === "string" ? body.role : "";
+        if (!targetUserId || !["owner","admin","editor","publisher","approver","viewer"].includes(role)) {
+          throw new Error("Некорректные данные роли");
+        }
+
+        const { data: actor, error: actorError } = await admin.from("workspace_members")
+          .select("workspace_id,role")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (actorError) throw actorError;
+        if (!actor || !["owner","admin"].includes(actor.role)) throw new Error("Изменять роли может только руководитель");
+        if (actor.role === "admin" && role === "owner") throw new Error("Только владелец может назначать владельца");
+
+        const { data: target, error: targetError } = await admin.from("workspace_members")
+          .select("workspace_id,role")
+          .eq("workspace_id", actor.workspace_id)
+          .eq("user_id", targetUserId)
+          .maybeSingle();
+        if (targetError) throw targetError;
+        if (!target) throw new Error("Участник не найден");
+        if (target.role === "owner") throw new Error("Владельца нельзя изменить здесь");
+        if (actor.role === "admin" && target.role === "admin" && targetUserId !== user.id) {
+          throw new Error("Администратор не может изменять другого администратора");
+        }
+        if (actor.role === "admin" && role === "admin") {
+          throw new Error("Только владелец может назначать администраторов");
+        }
+
+        const { error } = await admin.from("workspace_members")
+          .update({ role })
+          .eq("workspace_id", actor.workspace_id)
+          .eq("user_id", targetUserId);
+        if (error) throw error;
+        return json({ ok: true, user_id: targetUserId, role });
+      }
       case "list-invites": {
         const { data, error } = await admin.rpc("list_workspace_invites_for_user", { p_user_id: user.id });
         if (error) throw error;
         return json({ ok: true, invites: data ?? [] });
       }
       case "create-invite": {
+        const role = typeof body.role === "string" ? body.role : "editor";
+        if (!["editor","publisher","approver","viewer","admin"].includes(role)) {
+          throw new Error("Недопустимая роль приглашения");
+        }
+        const { data: currentMember, error: memberError } = await admin.from("workspace_members")
+          .select("workspace_id,role")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (memberError) throw memberError;
+        if (!currentMember || !["owner","admin"].includes(currentMember.role)) {
+          throw new Error("Создавать приглашения может только руководитель");
+        }
+        if (currentMember.role === "admin" && role === "admin") {
+          throw new Error("Только владелец может приглашать администраторов");
+        }
+
         const { data, error } = await admin.rpc("create_workspace_invite_for_user", {
           p_user_id: user.id,
           p_expires_in_hours: typeof body.expires_in_hours === "number" ? body.expires_in_hours : 168,
         });
         if (error) throw error;
         const invite = Array.isArray(data) ? data[0] : data;
-        return json({ ok: true, invite });
+        if (!invite?.invite_id) throw new Error("Не удалось создать приглашение");
+
+        const { error: roleError } = await admin.from("workspace_invites")
+          .update({ role })
+          .eq("id", invite.invite_id)
+          .eq("workspace_id", currentMember.workspace_id);
+        if (roleError) throw roleError;
+
+        return json({ ok: true, invite: { ...invite, role } });
       }
       case "revoke-invite": {
         const { data, error } = await admin.rpc("revoke_workspace_invite_for_user", {
