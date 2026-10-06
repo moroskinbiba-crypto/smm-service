@@ -20,3 +20,32 @@
 .connect-faq{margin-top:4px;border:1px solid #e1e4ea;border-radius:14px;overflow:hidden}.dark .connect-faq{border-color:#2a2e38}.connect-faq summary{cursor:pointer;list-style:none;padding:13px 14px;font-size:13px;font-weight:800}.connect-faq summary::-webkit-details-marker{display:none}.connect-faq summary:after{content:'+';float:right;opacity:.5;font-size:16px;line-height:1}.connect-faq[open] summary:after{content:'−'}.connect-faq-body{padding:0 14px 14px;display:grid;gap:9px;font-size:12px;line-height:1.55;opacity:.78}.connect-faq-body p{margin:0}.connect-faq-body a{color:inherit;font-weight:800;text-underline-offset:3px}.connect-faq-body b{font-weight:800}
 
 .stats-chart-card,.stats-platform-card{margin-bottom:20px}.stats-bars{height:230px;display:flex;align-items:end;gap:8px;margin-top:24px;padding:0 4px;overflow-x:auto}.stats-bar-item{min-width:34px;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:end;gap:5px}.stats-bar-value{font-size:9px;opacity:.55;white-space:nowrap}.stats-bar-track{height:180px;width:100%;display:flex;align-items:end}.stats-bar-fill{width:100%;min-height:4px;border-radius:7px 7px 3px 3px;background:#111;opacity:.8}.dark .stats-bar-fill{background:#fff}.stats-bar-item small{font-size:9px;opacity:.5}.stats-table-wide{overflow-x:auto}.stats-table-wide .stats-row{min-width:850px;grid-template-columns:1.4fr repeat(7,minmax(85px,1fr))}.stats-two-column{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}.stats-detail-list{display:grid;margin-top:12px}.stats-detail-list>div{display:flex;justify-content:space-between;gap:18px;padding:13px 0;border-top:1px solid #e6e9ef}.dark .stats-detail-list>div{border-color:#2a2e38}.stats-detail-list span{opacity:.62;font-size:13px}.stats-detail-list strong{font-size:15px}@media(max-width:900px){.stats-two-column{grid-template-columns:1fr}.stats-bars{gap:6px}}
+
+.nav-link-admin{font-weight:800}
+.admin-page .page-heading{align-items:end}
+.admin-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+.admin-search{width:100%;margin-top:14px;padding:12px 14px;border:1px solid #dfe3ea;border-radius:12px;background:transparent;color:inherit;font:inherit}
+.dark .admin-search{border-color:#353945}
+.admin-user-list{display:grid;gap:8px;margin-top:14px}
+.admin-user-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:13px;border:1px solid #e2e5eb;border-radius:14px}
+.dark .admin-user-row,.dark .admin-mini-row{border-color:#2a2e38}
+.admin-user-main{display:grid;gap:4px;min-width:0}
+.admin-user-main strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-user-main span,.admin-user-main small{font-size:11px;opacity:.55}
+.admin-status{padding:6px 9px;border-radius:999px;font-size:11px;font-weight:800;white-space:nowrap}
+.admin-status.active{background:#e9f7ef;color:#1a7b49}
+.admin-status.suspended{background:#fff0f0;color:#b23b3b}
+.admin-protected{padding:6px 9px;border-radius:999px;background:#eef1f5;font-size:11px;font-weight:800;white-space:nowrap}
+.dark .admin-protected{background:#242832}
+.admin-team-list{display:grid;gap:20px;margin-top:20px}
+.admin-team-card{display:grid;gap:16px}
+.admin-team-meta{margin-top:7px;font-size:12px;opacity:.55}
+.admin-team-content{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.admin-team-content h3{font-size:13px;margin:0 0 10px}
+.admin-mini-list{display:grid;gap:7px}
+.admin-mini-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 12px;border:1px solid #e2e5eb;border-radius:12px}
+.admin-mini-row>div{display:grid;gap:3px;min-width:0}
+.admin-mini-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-mini-row span{font-size:11px;opacity:.58}
+@media(max-width:1000px){.admin-stats{grid-template-columns:repeat(2,1fr)}.admin-team-content{grid-template-columns:1fr}}
+@media(max-width:600px){.admin-stats{grid-template-columns:1fr}.admin-user-row{grid-template-columns:1fr auto}.admin-user-row .secondary{grid-column:1/-1;width:100%}.admin-protected{justify-self:end}}
