@@ -251,3 +251,28 @@
 .publication-type-select{padding:8px 9px;border:1px solid #dfe3ea;border-radius:9px;background:transparent;color:inherit;font-size:11px}
 .dark .publication-type-select{border-color:#353945}
 .media-thumb video{width:100%;height:100%;object-fit:cover}
+
+.oauth-panel{margin:14px 0;padding:15px;border:1px solid #e0e4ea;border-radius:14px;background:#f7f8fa;display:grid;gap:8px}
+.dark .oauth-panel{border-color:#2a2e38;background:#20242c}
+.oauth-panel-title{font-weight:800}
+.oauth-panel p{font-size:12px;opacity:.62;line-height:1.5;margin:0}
+.max-connect-choice{margin:14px 0}.max-method-tabs{display:grid;gap:8px}
+.max-method{border:1px solid #e0e4ea;border-radius:13px;padding:14px;background:transparent;color:inherit;text-align:left;cursor:pointer;display:grid;gap:4px}
+.dark .max-method{border-color:#2a2e38}
+.max-method.active{background:#f1f3f7;border-color:#cbd2dc}
+.dark .max-method.active{background:#242832;border-color:#454b58}
+.max-method small{font-size:10px;opacity:.55}
+.max-service-form{display:grid;gap:10px}
+.max-steps{margin:0;padding-left:20px;font-size:12px;line-height:1.7;opacity:.72}
+.oauth-select-modal{width:min(620px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 32px));overflow:auto;background:var(--surface,#fff);border-radius:18px;padding:20px}
+.dark .oauth-select-modal{background:#181b21}
+.oauth-candidate-list{display:grid;gap:8px;margin-top:14px}
+.oauth-candidate{display:grid;grid-template-columns:42px minmax(0,1fr);gap:12px;align-items:center;border:1px solid #e1e4ea;border-radius:13px;background:transparent;color:inherit;padding:10px;text-align:left;cursor:pointer}
+.dark .oauth-candidate{border-color:#2a2e38}
+.oauth-candidate:hover{background:#f4f6f9}
+.dark .oauth-candidate:hover{background:#242832}
+.oauth-candidate>span:first-child{width:42px;height:42px;border-radius:12px;overflow:hidden;display:grid;place-items:center;background:#eef1f5;font-weight:900}
+.dark .oauth-candidate>span:first-child{background:#252932}
+.oauth-candidate img{width:100%;height:100%;object-fit:cover}
+.oauth-candidate>span:last-child{display:grid;gap:4px}.oauth-candidate small{font-size:10px;opacity:.55}
+.manual-fallback{margin-top:10px}
