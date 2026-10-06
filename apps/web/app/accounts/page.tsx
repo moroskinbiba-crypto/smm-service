@@ -168,7 +168,7 @@ export default function AccountsPage(){
           <div className="connected-list">
             {accounts.map(a=><div className="connected-account" key={a.id}>
               <div className={'connected-icon network-logo network-logo-'+a.platform}>{meta[a.platform as Platform]?.icon??'•'}</div>
-              <div className="connected-main"><strong>{a.display_name||a.username||a.external_id}</strong><span>{meta[a.platform as Platform]?.name??a.platform} · {a.external_id}</span>{a.last_error&&<small className="error-text">{a.last_error}</small>}</div>
+              <div className="connected-main"><strong>{a.display_name||a.username||a.external_id}</strong><span>{meta[a.platform as Platform]?.name??a.platform} · {a.external_id}</span></div>
               <span className={a.status==='connected'?'account-status connected':'account-status error'}>{a.status==='connected'?'Работает':'Ошибка'}</span>
               <button className="secondary" onClick={()=>void check(a.id)}>Проверить</button>
               <button className="secondary danger-button" onClick={()=>void disconnect(a.id)}>Отключить</button>
