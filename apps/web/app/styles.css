@@ -280,3 +280,28 @@
 .max-connect-code{display:grid;gap:7px;margin-top:10px;padding:12px;border:1px solid #dfe3ea;border-radius:12px;background:#f7f8fa}.dark .max-connect-code{border-color:#2a2e38;background:#20242c}.max-connect-code strong{font-size:15px}.max-connect-code code{padding:9px;border-radius:9px;background:#eef1f5;font-weight:800}.dark .max-connect-code code{background:#252932}.max-connect-code span,.max-connect-code small{font-size:10px;opacity:.58}
 
 .connection-method-heading{display:grid;gap:3px;margin:14px 0 8px}.connection-method-heading strong{font-size:13px}.connection-method-heading small{font-size:10px;opacity:.55}.connect-method-badge{display:inline-flex;width:max-content;padding:6px 9px;border-radius:999px;background:#eef1f5;font-size:10px;font-weight:800;margin-bottom:6px}.dark .connect-method-badge{background:#252932}
+
+
+/* TGRMLposting visual refinements */
+.brand-mark{font-weight:900}
+.floating-contact{position:fixed;right:18px;bottom:16px;z-index:30;text-decoration:none;font-size:12px;font-weight:800;padding:9px 12px;border:1px solid #dfe3ea;border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 8px 24px rgba(0,0,0,.08)}
+.dark .floating-contact{background:rgba(25,28,34,.94);border-color:#343a45;color:#fff}
+.social-card-logo{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;min-width:22px;border-radius:7px;font-size:10px;font-weight:900;line-height:1}
+.social-card-logo-telegram{background:#2aabee;color:#fff;font-size:13px}
+.social-card-logo-vk{background:#0077ff;color:#fff}
+.social-card-logo-max{background:#111;color:#fff;font-size:12px}
+.social-card-logo-ok{background:#ee8208;color:#fff;font-size:8px}
+.social-card-logo-instagram{background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);color:#fff;font-size:14px}
+.calendar-post-logos,.post-target-logos{display:flex;gap:4px;align-items:center}
+.calendar-post-logos{position:absolute;top:7px;left:7px}
+.calendar-post{position:relative}
+.plan-content{display:grid;gap:6px}
+.format-stats{display:flex;flex-wrap:wrap;gap:10px}
+.format-stat{min-width:150px;display:grid;gap:3px;padding:12px;border:1px solid #e4e7ec;border-radius:12px}
+.dark .format-stat{border-color:#2f3440}
+.format-stat span{font-size:12px;opacity:.65}
+.format-stat b{font-size:18px}
+.telegram-notification-card{margin-bottom:14px}
+.telegram-notify-connect{display:grid;gap:8px;max-width:460px}
+.telegram-start-link{display:inline-flex;width:max-content;text-decoration:none;align-items:center}
+@media (max-width:700px){.floating-contact{right:10px;bottom:10px;font-size:11px}.social-card-logo{width:20px;height:20px;min-width:20px}.format-stat{min-width:132px}}
