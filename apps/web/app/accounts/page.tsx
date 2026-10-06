@@ -7,7 +7,7 @@ import { appRequest, type SocialAccount } from '../../lib/app-api';
 type Platform='telegram'|'vk'|'max'|'ok'|'instagram';
 
 const meta: Record<Platform,{name:string;icon:string;help:string}> = {
-  telegram:{name:'Telegram',icon:'✈️',help:'Bot token + @username/chat_id. Для Telegram Business Stories можно дополнительно указать business connection ID.'},
+  telegram:{name:'Telegram',icon:'✈️',help:'Два способа: токен вашего бота или бот SMM-сервиса. Для Telegram Business Stories используйте отдельный Business-сценарий — connection ID вводить не нужно.'},
   vk:{name:'VK',icon:'VK',help:'Удобнее войти через VK OAuth и выбрать нужное сообщество прямо в сервисе.'},
   max:{name:'MAX',icon:'M',help:'Два способа: токен вашего бота или подключение через служебного бота, добавленного в канал.'},
   ok:{name:'Одноклассники',icon:'OK',help:'OAuth access token + application key/secret + ID группы.'},
@@ -28,7 +28,6 @@ export default function AccountsPage(){
   const [name,setName]=useState('');
   const [appKey,setAppKey]=useState('');
   const [appSecret,setAppSecret]=useState('');
-  const [telegramBusinessConnectionId,setTelegramBusinessConnectionId]=useState('');
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState('');
   const [oauthLoading,setOauthLoading]=useState('');
@@ -87,7 +86,6 @@ export default function AccountsPage(){
     try{
       const metadata:any={};
       if(platform==='ok'){metadata.application_key=appKey;metadata.group_id=externalId}
-      if(platform==='telegram'&&telegramBusinessConnectionId){metadata.business_connection_id=telegramBusinessConnectionId}
       const r=await appRequest<{account:SocialAccount}>('connect-account',{
         platform,
         access_token:token,
@@ -97,7 +95,7 @@ export default function AccountsPage(){
         metadata,
       });
       setAccounts(v=>[...v,r.account]);
-      setToken('');setExternalId('');setName('');setAppKey('');setAppSecret('');setTelegramBusinessConnectionId('');
+      setToken('');setExternalId('');setName('');setAppKey('');setAppSecret('');
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить')}finally{setBusy(false)}
   }
 
