@@ -10,10 +10,28 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
 
   function getNext() {
     const next = new URLSearchParams(window.location.search).get('next');
     return next && next.startsWith('/') ? next : '/';
+  }
+
+  async function sendPasswordReset() {
+    setRecoveryBusy(true);
+    setMessage('');
+
+    const redirectTo = window.location.origin + '/auth/callback?next=' + encodeURIComponent('/auth/reset');
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+
+    setRecoveryBusy(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setMessage('Если аккаунт с таким email существует, мы отправили письмо со ссылкой для восстановления пароля.');
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -60,6 +78,12 @@ export default function AuthPage() {
         </form>
 
         {message && <div className="auth-message">{message}</div>}
+
+        {mode === 'login' && (
+          <button type="button" className="auth-switch" disabled={recoveryBusy || !email} onClick={sendPasswordReset}>
+            {recoveryBusy ? 'Отправляем…' : 'Забыли пароль? Восстановить'}
+          </button>
+        )}
 
         <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}>
           {mode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
