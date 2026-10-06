@@ -927,9 +927,9 @@ Deno.serve(async (req: Request) => {
           return json({ ok: true, accounts: data ?? [] });
         }
       case "telegram-notifications-start": {
-        const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
-        const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
-        if (!token || !username) throw new Error("Служебный Telegram-бот ещё не настроен");
+        const token = Deno.env.get("TGRML_NOTIFY_BOT_TOKEN") ?? "";
+        const username = Deno.env.get("TGRML_NOTIFY_BOT_USERNAME") ?? "";
+        if (!token || !username) throw new Error("Telegram-бот уведомлений ещё не настроен");
         const code = randomToken(10);
         const { error } = await ctx.admin.from("telegram_notification_requests").insert({
           user_id: ctx.user.id,
