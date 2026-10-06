@@ -56,7 +56,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
 
   return <main className={theme==='dark'?'shell dark':'shell'}>
     <header className="topbar app-topbar">
-      <div className="brand"><span className="brand-mark">S</span><span>SMM Service</span></div>
+      <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
       <nav className="main-nav" aria-label="Основная навигация">
         <Link className={active==='plan'?'nav-link active':'nav-link'} href="/">План публикаций</Link>
         <Link className={active==='accounts'?'nav-link active':'nav-link'} href="/accounts">Аккаунты</Link>
@@ -74,5 +74,6 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
       <div className="top-actions"><Link className="workspace-chip" href="/team"><span className="workspace-dot"/>{workspace?.workspace_name??'Команда'}</Link><button className="theme" onClick={()=>{const next=theme==='light'?'dark':'light';setTheme(next);window.localStorage.setItem('smm-theme',next)}}>{theme==='light'?'☾':'☀'} Тема</button><button className="profile-button" onClick={signOut}>Выйти</button></div>
     </header>
     {children}
+    <a className="floating-contact" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться в Telegram">Telegram · @truegromle</a>
   </main>;
 }
