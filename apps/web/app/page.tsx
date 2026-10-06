@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from './components/app-shell';
 import { appRequest, type ApiPost, type SocialAccount, uploadMedia } from '../lib/app-api';
 
+type AccountGroup={id:string;name:string;description:string|null;account_ids:string[]};
 const meta: Record<string, {name:string; icon:string}> = {
   telegram:{name:'Telegram',icon:'➤'}, vk:{name:'VK',icon:'vk'},
   max:{name:'MAX',icon:'M'}, ok:{name:'Одноклассники',icon:'OK'},
@@ -36,11 +37,12 @@ function parseCsv(input:string){
   return rows;
 }
 
-function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:string;workspaceRole:string;onClose:()=>void;onSaved:()=>Promise<void>}){
-  const {post,accounts,workspaceId,workspaceRole,onClose,onSaved}=props;
+function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:AccountGroup[];workspaceId:string;workspaceRole:string;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const {post,accounts,groups,workspaceId,workspaceRole,onClose,onSaved}=props;
   const base=post?.scheduled_at?new Date(post.scheduled_at):new Date(Date.now()+3600000);
   const [text,setText]=useState(post?.body??'');
   const [selected,setSelected]=useState<string[]>(post?.post_targets.map(t=>t.social_account_id)??accounts.filter(a=>a.status==='connected').map(a=>a.id));
+  const [selectedGroupId,setSelectedGroupId]=useState('');
   const [publicationTypes,setPublicationTypes]=useState<Record<string,'feed'|'reel'|'story'|'clip'>>(
     Object.fromEntries((post?.post_targets??[]).map(t=>[t.social_account_id,(t.publication_type as 'feed'|'reel'|'story'|'clip'|undefined)||'feed']))
   );
@@ -50,6 +52,13 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
   const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(''); const [showEmoji,setShowEmoji]=useState(false);
   const [showAI,setShowAI]=useState(false); const [aiMode,setAiMode]=useState('improve'); const [aiBusy,setAiBusy]=useState(false);
   const [showUTM,setShowUTM]=useState(false); const [utmSource,setUtmSource]=useState(''); const [utmMedium,setUtmMedium]=useState('social'); const [utmCampaign,setUtmCampaign]=useState(''); const [utmContent,setUtmContent]=useState('');
+  function applyGroup(groupId:string){
+    setSelectedGroupId(groupId);
+    const group=groups.find(g=>g.id===groupId);
+    if(!group)return;
+    const available=new Set(accounts.filter(a=>a.status==='connected').map(a=>a.id));
+    setSelected(group.account_ids.filter(id=>available.has(id)));
+  }
   async function files(fs:FileList|File[]){setBusy(true);setMsg('');try{const incoming=Array.from(fs);if(media.length+incoming.length>10)throw new Error('В одной публикации можно добавить не более 10 медиафайлов');const next: Awaited<ReturnType<typeof uploadMedia>>[]=[];for(const f of incoming)next.push(await uploadMedia(workspaceId,f));setMedia(v=>[...v,...next]);}catch(e){setMsg(e instanceof Error?e.message:'Не удалось загрузить файл')}finally{setBusy(false)}}
   function wrap(a:string,b=a){const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;setText(text.slice(0,s)+a+text.slice(s,e)+b+text.slice(e));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(s+a.length,e+a.length)})}
   async function save(kind:'draft'|'schedule'|'publish'){if(!selected.length){setMsg('Выберите хотя бы один аккаунт.');return}if(!text.trim()&&!media.length){setMsg('Добавьте текст или медиафайл.');return}setBusy(true);setMsg('');try{const x=await appRequest<{post_id:string}>('save-post',{post_id:post?.id,text,media,scheduled_at:kind==='draft'?null:new Date(date+'T'+time).toISOString(),target_account_ids:selected,target_publication_types:publicationTypes});if(kind==='publish'){const result=await appRequest<{status:string;results?:Array<{ok:boolean;error?:string}>}>('publish-now',{post_id:x.post_id});if(result.status!=='published'){await onSaved();const errors=(result.results??[]).filter(r=>!r.ok).map(r=>r.error).filter(Boolean);setMsg('Публикация завершена со статусом «'+label(result.status)+'». '+(errors.length?errors.join(' · '):'Проверьте статусы площадок.'));return;}}await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось сохранить')}finally{setBusy(false)}}
@@ -116,7 +125,9 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
       <div className="upload-area" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void files(e.dataTransfer.files)}}><input id="post-file" hidden type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-matroska" multiple onChange={e=>{if(e.target.files)void files(e.target.files)}}/><label htmlFor="post-file"><strong>Добавить фото или видео</strong><span>до 10 файлов, видео до 250 МБ</span></label></div>
       {!!media.length&&<div className="media-list">{media.map((m,i)=><div className="media-item" key={m.path} draggable onDragStart={e=>e.dataTransfer.setData('text/plain',String(i))} onDragOver={e=>e.preventDefault()} onDrop={e=>{const from=Number(e.dataTransfer.getData('text/plain'));if(Number.isNaN(from)||from===i)return;const n=[...media];const [x]=n.splice(from,1);n.splice(i,0,x);setMedia(n.map((q,j)=>({...q,order:j})))}}><div className="media-thumb">{m.signed_url?(m.type?.startsWith('video/')?<video src={m.signed_url} muted playsInline />:<img src={m.signed_url} alt=""/>):m.type?.startsWith('video/')?'🎬':'🖼️'}</div><div className="media-info"><strong>{m.name}</strong><span>Перетащите или используйте стрелки для изменения порядка</span></div><div className="media-actions"><button className="secondary" disabled={i===0} onClick={()=>{if(i===0)return;const n=[...media];[n[i-1],n[i]]=[n[i],n[i-1]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↑</button><button className="secondary" disabled={i===media.length-1} onClick={()=>{if(i>=media.length-1)return;const n=[...media];[n[i],n[i+1]]=[n[i+1],n[i]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↓</button><button className="secondary" onClick={()=>setMedia(v=>v.filter((_,j)=>j!==i))}>Удалить</button></div></div>)}</div>}
     </section>
-    <aside className="editor-aside"><div className="editor-block"><h3>Площадки</h3><div className="account-select-list">{accounts.map(a=><div key={a.id} className={selected.includes(a.id)?'account-target-row selected':'account-target-row'}>
+    <aside className="editor-aside"><div className="editor-block"><h3>Площадки</h3>
+      {!!groups.length&&<><select className="editor-group-select" value={selectedGroupId} onChange={e=>applyGroup(e.target.value)}><option value="">Выбрать группу аккаунтов…</option>{groups.map(g=><option key={g.id} value={g.id}>{g.name} · {g.account_ids.length}</option>)}</select>{selectedGroupId&&<div className="group-selection-note">Группа выбрана. Снимите галочку/нажмите на аккаунт ниже, чтобы исключить отдельные аккаунты из этой публикации.</div>}</>}
+      <div className="account-select-list">{accounts.map(a=><div key={a.id} className={selected.includes(a.id)?'account-target-row selected':'account-target-row'}>
   <button onClick={()=>a.status==='connected'&&setSelected(v=>v.includes(a.id)?v.filter(x=>x!==a.id):[...v,a.id])} className="account-select" disabled={a.status!=='connected'}>
     <span className={'network-icon network-logo network-logo-'+a.platform}>{meta[a.platform]?.icon??'•'}</span><span><strong>{a.display_name||a.username||a.external_id}</strong><small>{meta[a.platform]?.name??a.platform}</small></span><span className={a.status==='connected'?'account-state ok':'account-state'}>{a.status==='connected'?'✓':'!'}</span>
   </button>
@@ -136,7 +147,11 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
 
 export default function Home(){
   const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
-  async function load(){const [a,p]=await Promise.all([appRequest<{accounts:SocialAccount[]}>('list-accounts'),appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string}}>('list-posts',range(cursor))]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setAccounts(a.accounts??[]);setPosts(p.posts??[])}
+  async function load(){const [a,g,p]=await Promise.all([
+    appRequest<{accounts:SocialAccount[]}>('list-accounts'),
+    appRequest<{groups:AccountGroup[]}>('list-account-groups'),
+    appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string}}>('list-posts',range(cursor))
+  ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
   const days=useMemo(()=>{if(view==='month'){const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))}const f=new Date(cursor);const monday=new Date(f);monday.setDate(f.getDate()-((f.getDay()+6)%7));if(view==='week')return Array.from({length:7},(_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i));return [new Date(cursor)]},[cursor,view]);
   const byDay=useMemo(()=>{const m=new Map<string,ApiPost[]>();for(const p of posts){const d=p.scheduled_at||(p.status==='published'?p.created_at:null);if(!d)continue;const k=new Date(d).toISOString().slice(0,10);m.set(k,[...(m.get(k)??[]),p])}return m},[posts]);
