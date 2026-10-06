@@ -221,3 +221,7 @@
 .calendar-view-week{grid-template-columns:repeat(7,1fr)}
 .calendar-view-day{grid-template-columns:1fr}
 .calendar-view-day .calendar-cell{min-height:520px}
+
+.member-role-select,.invite-role-select{padding:9px 10px;border:1px solid #dfe3ea;border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:12px}
+.dark .member-role-select,.dark .invite-role-select{border-color:#353945}
+.invite-role-label{display:grid;gap:6px;font-size:12px;font-weight:700;margin:14px 0 10px}
