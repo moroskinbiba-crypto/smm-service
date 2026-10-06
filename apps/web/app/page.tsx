@@ -121,7 +121,8 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
   </button>
   {selected.includes(a.id)&&<select className="publication-type-select" value={publicationTypes[a.id]||'feed'} onChange={e=>setPublicationTypes(v=>({...v,[a.id]:e.target.value as any}))}>
     <option value="feed">Пост</option>
-    {(a.platform==='instagram'||a.platform==='telegram')&&<option value="story">Сторис</option>}
+    {a.platform==='instagram'&&String(a.metadata?.account_type||'').toUpperCase()==='BUSINESS'&&<option value="story">Сторис</option>}
+    {a.platform==='telegram'&&a.metadata?.business_connection_id&&<option value="story">Сторис</option>}
     {a.platform==='instagram'&&<option value="reel">Reels</option>}
   </select>}
 </div>)}</div>{post?.post_targets?.some(t=>t.last_error)&&<div className="target-errors">{post.post_targets.filter(t=>t.last_error).map(t=><div key={t.id}><strong>{meta[t.platform]?.name??t.platform}:</strong> {t.last_error}</div>)}</div>}{!accounts.length&&<div className="empty small-empty">Подключите аккаунт.</div>}</div>
