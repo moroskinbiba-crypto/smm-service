@@ -243,3 +243,11 @@
 @media(max-width:480px){.media-library-grid{grid-template-columns:1fr}}
 
 .plan-heading-actions{display:flex;align-items:center;gap:8px}.plan-heading-actions label{cursor:pointer}@media(max-width:600px){.plan-heading-actions{width:100%;justify-content:flex-end}}
+
+.account-target-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.account-target-row .account-select{width:100%}
+.account-target-row.selected{padding:4px;border-radius:12px;background:#f4f6f9}
+.dark .account-target-row.selected{background:#242832}
+.publication-type-select{padding:8px 9px;border:1px solid #dfe3ea;border-radius:9px;background:transparent;color:inherit;font-size:11px}
+.dark .publication-type-select{border-color:#353945}
+.media-thumb video{width:100%;height:100%;object-fit:cover}
