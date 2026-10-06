@@ -95,6 +95,7 @@ Deno.serve(async (req: Request) => {
           .maybeSingle();
         if (targetError) throw targetError;
         if (!target) throw new Error("Участник не найден");
+        if (targetUserId === user.id) throw new Error("Нельзя изменить собственную роль");
         if (target.role === "owner") throw new Error("Владельца нельзя изменить здесь");
         if (actor.role === "admin" && target.role === "admin" && targetUserId !== user.id) {
           throw new Error("Администратор не может изменять другого администратора");
