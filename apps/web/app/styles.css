@@ -183,3 +183,8 @@
 .competitor-updated{opacity:.45;font-size:10px}
 @media(max-width:900px){.competitor-form{grid-template-columns:1fr 1fr}.competitor-metrics{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.competitor-form{grid-template-columns:1fr}.competitor-card-head{flex-direction:column}.competitor-card-actions{width:100%}.competitor-card-actions .secondary{flex:1}.competitor-metrics{grid-template-columns:1fr 1fr}}
+
+.topic-cloud{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
+.topic-cloud span{padding:7px 10px;border-radius:999px;background:#eef1f5;font-weight:700}
+.dark .topic-cloud span{background:#242832}
+.topic-cloud small{opacity:.5;font-size:10px}
