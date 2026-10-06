@@ -202,3 +202,6 @@
 .notification-row strong{font-size:13px}
 .notification-row span{font-size:12px;opacity:.65;line-height:1.45}
 .notification-row small{font-size:10px;opacity:.45}
+
+.utm-popover input{padding:10px;border:1px solid #dfe3ea;border-radius:10px;background:transparent;color:inherit;font:inherit}
+.dark .utm-popover input{border-color:#353945}
