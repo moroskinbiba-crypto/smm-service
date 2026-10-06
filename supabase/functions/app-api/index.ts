@@ -427,27 +427,86 @@ Deno.serve(async (req: Request) => {
         {
           const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 30 * 86400000).toISOString();
           const to = body.to ? new Date(body.to).toISOString() : new Date().toISOString();
-          const { data: posts, error: postsError } = await ctx.admin.from("posts").select("id,status,scheduled_at,created_at").eq("workspace_id", ctx.workspace.workspace_id);
+          const { data: posts, error: postsError } = await ctx.admin.from("posts")
+            .select("id,status,scheduled_at,created_at")
+            .eq("workspace_id", ctx.workspace.workspace_id);
           if (postsError) throw postsError;
-          const { data: targets, error: targetsError } = await ctx.admin.from("post_targets").select("id,platform,status,published_at,metrics,post_id,posts!inner(workspace_id)").eq("posts.workspace_id", ctx.workspace.workspace_id);
+
+          const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
+            .select("id,platform,status,published_at,metrics,post_id,posts!inner(workspace_id)")
+            .eq("posts.workspace_id", ctx.workspace.workspace_id);
           if (targetsError) throw targetsError;
+
           const scopedPosts = (posts ?? []).filter((p: any) => {
             const d = p.scheduled_at || p.created_at;
             return d >= from && d <= to;
           });
           const postIds = new Set(scopedPosts.map((p: any) => p.id));
           const scopedTargets = (targets ?? []).filter((t: any) => postIds.has(t.post_id));
+
+          const emptyMetrics = () => ({
+            published: 0,
+            failed: 0,
+            views: 0,
+            likes: 0,
+            comments: 0,
+            reposts: 0,
+          });
+
           const byPlatform: Record<string, any> = {};
+          const daily: Record<string, any> = {};
+
           for (const t of scopedTargets) {
-            byPlatform[t.platform] ||= { platform: t.platform, published: 0, failed: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
-            if (t.status === "published") byPlatform[t.platform].published++;
-            if (t.status === "failed") byPlatform[t.platform].failed++;
+            byPlatform[t.platform] ||= { platform: t.platform, ...emptyMetrics() };
+            const platform = byPlatform[t.platform];
+
+            if (t.status === "published") platform.published++;
+            if (t.status === "failed") platform.failed++;
+
             const m = t.metrics ?? {};
-            byPlatform[t.platform].views += Number(m.views ?? 0);
-            byPlatform[t.platform].likes += Number(m.likes ?? 0);
-            byPlatform[t.platform].comments += Number(m.comments ?? 0);
-            byPlatform[t.platform].reposts += Number(m.reposts ?? 0);
+            platform.views += Number(m.views ?? 0);
+            platform.likes += Number(m.likes ?? 0);
+            platform.comments += Number(m.comments ?? 0);
+            platform.reposts += Number(m.reposts ?? 0);
+
+            if (t.status === "published" && t.published_at) {
+              const day = String(t.published_at).slice(0, 10);
+              daily[day] ||= { date: day, published: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
+              daily[day].published++;
+              daily[day].views += Number(m.views ?? 0);
+              daily[day].likes += Number(m.likes ?? 0);
+              daily[day].comments += Number(m.comments ?? 0);
+              daily[day].reposts += Number(m.reposts ?? 0);
+            }
           }
+
+          const enrich = (item: any) => {
+            item.engagement = item.likes + item.comments + item.reposts;
+            item.engagement_rate = item.views > 0 ? Number(((item.engagement / item.views) * 100).toFixed(2)) : 0;
+            item.avg_views = item.published > 0 ? Math.round(item.views / item.published) : 0;
+            item.avg_engagement = item.published > 0 ? Number((item.engagement / item.published).toFixed(2)) : 0;
+            item.success_rate = item.published + item.failed > 0
+              ? Number(((item.published / (item.published + item.failed)) * 100).toFixed(1))
+              : 0;
+            return item;
+          };
+
+          Object.values(byPlatform).forEach(enrich);
+          Object.values(daily).forEach(enrich);
+
+          const totals = Object.values(byPlatform).reduce((acc: any, item: any) => {
+            acc.views += item.views;
+            acc.likes += item.likes;
+            acc.comments += item.comments;
+            acc.reposts += item.reposts;
+            acc.publishedTargets += item.published;
+            acc.failedTargets += item.failed;
+            return acc;
+          }, { views: 0, likes: 0, comments: 0, reposts: 0, publishedTargets: 0, failedTargets: 0 });
+
+          const engagement = totals.likes + totals.comments + totals.reposts;
+          const activeDays = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
+
           return json({
             ok: true,
             summary: {
@@ -455,12 +514,21 @@ Deno.serve(async (req: Request) => {
               published: scopedPosts.filter((p: any) => p.status === "published").length,
               scheduled: scopedPosts.filter((p: any) => p.status === "scheduled").length,
               failed: scopedPosts.filter((p: any) => p.status === "failed").length,
-              views: Object.values(byPlatform).reduce((n: number, x: any) => n + x.views, 0),
-              likes: Object.values(byPlatform).reduce((n: number, x: any) => n + x.likes, 0),
-              comments: Object.values(byPlatform).reduce((n: number, x: any) => n + x.comments, 0),
-              reposts: Object.values(byPlatform).reduce((n: number, x: any) => n + x.reposts, 0),
+              views: totals.views,
+              likes: totals.likes,
+              comments: totals.comments,
+              reposts: totals.reposts,
+              engagement,
+              engagement_rate: totals.views > 0 ? Number(((engagement / totals.views) * 100).toFixed(2)) : 0,
+              avg_views_per_post: totals.publishedTargets > 0 ? Math.round(totals.views / totals.publishedTargets) : 0,
+              avg_engagement_per_post: totals.publishedTargets > 0 ? Number((engagement / totals.publishedTargets).toFixed(2)) : 0,
+              success_rate: totals.publishedTargets + totals.failedTargets > 0
+                ? Number(((totals.publishedTargets / (totals.publishedTargets + totals.failedTargets)) * 100).toFixed(1))
+                : 0,
+              publications_per_day: Number((scopedPosts.length / activeDays).toFixed(2)),
             },
             by_platform: Object.values(byPlatform),
+            daily: Object.values(daily).sort((a: any, b: any) => a.date.localeCompare(b.date)),
           });
         }
       default:
