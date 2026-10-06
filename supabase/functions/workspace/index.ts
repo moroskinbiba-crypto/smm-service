@@ -42,6 +42,8 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: profile.suspended_reason || "Аккаунт приостановлен администратором" }, 403);
   }
 
+  const selectedWorkspaceId = (req.headers.get("x-workspace-id") || "").trim() || null;
+
   let body: { action?: string; [key: string]: unknown };
   try {
     body = await req.json();
@@ -51,6 +53,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (body.action) {
+      case "list-workspaces": {
+        const { data, error } = await admin.rpc("list_workspaces_for_user", { p_user_id: user.id });
+        if (error) throw error;
+        return json({ ok: true, workspaces: data ?? [] });
+      }
       case "bootstrap": {
         const { data, error } = await admin.rpc("ensure_workspace_for_user", {
           p_user_id: user.id,
@@ -62,12 +69,12 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
       }
       case "get-workspace": {
-        const { data, error } = await admin.rpc("get_workspace_for_user", { p_user_id: user.id });
+        const { data, error } = await admin.rpc("get_workspace_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
         if (error) throw error;
         return json({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
       }
       case "members": {
-        const { data, error } = await admin.rpc("list_workspace_members_for_user", { p_user_id: user.id });
+        const { data, error } = await admin.rpc("list_workspace_members_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
         if (error) throw error;
         const workspaceId = Array.isArray(data) && data[0] ? data[0].workspace_id : null;
         let enriched = data ?? [];
@@ -91,19 +98,26 @@ Deno.serve(async (req: Request) => {
         }
         return json({ ok: true, members: enriched });
       }
+      case "remove-member": {
+        const targetUserId = String(body.user_id || "");
+        if (!targetUserId) throw new Error("Не указан пользователь");
+        const { data: removed, error } = await admin.rpc("remove_workspace_member_for_user", {
+          p_actor_id: user.id,
+          p_target_id: targetUserId,
+          p_workspace_id: selectedWorkspaceId,
+        });
+        if (error) throw error;
+        return json({ ok: true, removed: removed === true, user_id: targetUserId });
+      }
       case "suspend-member": {
         const targetUserId = String(body.user_id || "");
         const suspended = body.suspended === true;
         if (!targetUserId) throw new Error("Не указан пользователь");
         if (targetUserId === user.id) throw new Error("Нельзя приостановить собственный аккаунт");
 
-        const { data: actor, error: actorError } = await admin.from("workspace_members")
-          .select("workspace_id,role")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (actorError) throw actorError;
+        const { data: contextRows, error: contextError } = await admin.rpc("get_workspace_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
+        if (contextError) throw contextError;
+        const actor = Array.isArray(contextRows) ? contextRows[0] : contextRows;
         if (!actor || !["owner","admin"].includes(actor.role)) throw new Error("Недостаточно прав");
 
         const { data: target, error: targetError } = await admin.from("workspace_members")
@@ -142,8 +156,7 @@ Deno.serve(async (req: Request) => {
         const { data: actor, error: actorError } = await admin.from("workspace_members")
           .select("workspace_id,role")
           .eq("user_id", user.id)
-          .order("created_at", { ascending: true })
-          .limit(1)
+          .eq("workspace_id", selectedWorkspaceId || "")
           .maybeSingle();
         if (actorError) throw actorError;
         if (!actor || !["owner","admin"].includes(actor.role)) throw new Error("Изменять роли может только руководитель");
@@ -173,7 +186,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, user_id: targetUserId, role });
       }
       case "list-invites": {
-        const { data, error } = await admin.rpc("list_workspace_invites_for_user", { p_user_id: user.id });
+        const { data, error } = await admin.rpc("list_workspace_invites_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
         if (error) throw error;
         return json({ ok: true, invites: data ?? [] });
       }
@@ -199,23 +212,19 @@ Deno.serve(async (req: Request) => {
         const { data, error } = await admin.rpc("create_workspace_invite_for_user", {
           p_user_id: user.id,
           p_expires_in_hours: typeof body.expires_in_hours === "number" ? body.expires_in_hours : 168,
+          p_workspace_id: selectedWorkspaceId,
+          p_role: role,
         });
         if (error) throw error;
         const invite = Array.isArray(data) ? data[0] : data;
         if (!invite?.invite_id) throw new Error("Не удалось создать приглашение");
-
-        const { error: roleError } = await admin.from("workspace_invites")
-          .update({ role })
-          .eq("id", invite.invite_id)
-          .eq("workspace_id", currentMember.workspace_id);
-        if (roleError) throw roleError;
-
         return json({ ok: true, invite: { ...invite, role } });
       }
       case "revoke-invite": {
         const { data, error } = await admin.rpc("revoke_workspace_invite_for_user", {
           p_user_id: user.id,
           p_invite_id: body.invite_id,
+          p_workspace_id: selectedWorkspaceId,
         });
         if (error) throw error;
         return json({ ok: true, revoked: data === true });
