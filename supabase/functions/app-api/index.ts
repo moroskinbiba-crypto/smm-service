@@ -217,7 +217,7 @@ async function loadPosts(ctx: any, body: any) {
   const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 45 * 86400000).toISOString();
   const to = body.to ? new Date(body.to).toISOString() : new Date(Date.now() + 90 * 86400000).toISOString();
 
-  const select = "id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))";
+  const select = "id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,approval_status,approval_requested_by,approval_approved_by,approval_comment,approval_updated_at,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))";
 
   const [scheduledResult, unscheduledResult] = await Promise.all([
     ctx.admin.from("posts")
@@ -483,6 +483,8 @@ async function publishPost(ctx: any, postId: string) {
     .maybeSingle();
   if (postError) throw postError;
   if (!post) throw new Error("Публикация не найдена");
+  if (post.approval_status === "pending") throw new Error("Публикация ожидает согласования");
+  if (post.approval_status === "rejected") throw new Error("Публикация отклонена. Отправьте её на согласование повторно.");
   if (!["draft", "scheduled", "failed", "partially_published"].includes(post.status)) throw new Error("Публикацию нельзя отправить из текущего состояния");
 
   const media = await signedMedia(ctx.admin, post.media);
@@ -783,6 +785,102 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "request-approval":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const { data: post, error } = await ctx.admin.from("posts")
+            .select("id,status,approval_status")
+            .eq("id", String(body.post_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (error) throw error;
+          if (!post) throw new Error("Публикация не найдена");
+          if (post.status === "publishing") throw new Error("Нельзя отправить на согласование публикацию во время отправки");
+
+          await ctx.admin.from("post_approvals")
+            .update({ status: "rejected", reviewed_at: new Date().toISOString(), comment: "Предыдущий запрос закрыт новым запросом" })
+            .eq("post_id", post.id)
+            .eq("status", "pending");
+
+          const { error: postError } = await ctx.admin.from("posts").update({
+            approval_status: "pending",
+            approval_requested_by: ctx.user.id,
+            approval_approved_by: null,
+            approval_comment: null,
+            approval_updated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq("id", post.id);
+          if (postError) throw postError;
+
+          const { error: approvalError } = await ctx.admin.from("post_approvals").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            post_id: post.id,
+            requested_by: ctx.user.id,
+            status: "pending",
+          });
+          if (approvalError) throw approvalError;
+          return json({ ok: true, approval_status: "pending" });
+        }
+      case "review-approval":
+        {
+          if (!["owner", "admin", "approver"].includes(ctx.workspace.role)) {
+            throw new Error("Согласовывать публикации может только руководитель или согласующий");
+          }
+          const postId = String(body.post_id || "");
+          const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
+          if (!decision) throw new Error("Некорректное решение");
+          const comment = typeof body.comment === "string" && body.comment.trim() ? body.comment.trim() : null;
+
+          const { data: post, error: postError } = await ctx.admin.from("posts")
+            .select("id,status,approval_status")
+            .eq("id", postId)
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (postError) throw postError;
+          if (!post) throw new Error("Публикация не найдена");
+          if (post.approval_status !== "pending") throw new Error("Эта публикация больше не ожидает согласования");
+
+          const { data: approval, error: approvalLoadError } = await ctx.admin.from("post_approvals")
+            .select("id")
+            .eq("post_id", postId)
+            .eq("status", "pending")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (approvalLoadError) throw approvalLoadError;
+
+          const { error: updatePostError } = await ctx.admin.from("posts").update({
+            approval_status: decision,
+            approval_approved_by: ctx.user.id,
+            approval_comment: comment,
+            approval_updated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq("id", postId);
+          if (updatePostError) throw updatePostError;
+
+          if (approval) {
+            const { error: updateApprovalError } = await ctx.admin.from("post_approvals").update({
+              status: decision,
+              reviewed_by: ctx.user.id,
+              comment,
+              reviewed_at: new Date().toISOString(),
+            }).eq("id", approval.id);
+            if (updateApprovalError) throw updateApprovalError;
+          }
+
+          return json({ ok: true, approval_status: decision });
+        }
+      case "list-approval-queue":
+        {
+          const { data, error } = await ctx.admin.from("posts")
+            .select("id,body,media,status,scheduled_at,created_at,updated_at,approval_status,approval_requested_by,approval_comment,approval_updated_at,post_targets(id,platform,status,social_accounts(display_name,username))")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .eq("approval_status", "pending")
+            .order("updated_at", { ascending: false })
+            .limit(100);
+          if (error) throw error;
+          return json({ ok: true, posts: data ?? [], role: ctx.workspace.role });
+        }
       case "sync-inbox":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
