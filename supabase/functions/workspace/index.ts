@@ -97,6 +97,6 @@ Deno.serve(async (req: Request) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    return json({ ok: false, error: message }, 400);
+    return json({ ok: false, error: message });
   }
 });
