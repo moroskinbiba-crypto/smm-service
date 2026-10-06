@@ -6,12 +6,14 @@ import { createClient } from '../../lib/supabase/client';
 import { workspaceRequest } from '../../lib/workspace-api';
 import { appRequest } from '../../lib/app-api';
 
-type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
+type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number };
+type WorkspaceOption = Workspace;
 
 export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'recurrences' | 'competitors' | 'content' | 'notifications' | 'automation' | 'media' | 'admin'; children: ReactNode }) {
   const supabase = createClient();
   const [theme, setTheme] = useState<'light'|'dark'>('light');
   const [workspace, setWorkspace] = useState<Workspace|null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -27,6 +29,15 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
           window.location.assign('/auth');
           return;
         }
+
+        const listResult = await workspaceRequest<{workspaces: WorkspaceOption[]}>('list-workspaces');
+        const available = listResult.workspaces ?? [];
+        let preferred = window.localStorage.getItem('smm-workspace-id') || '';
+        if (!available.some(item => item.workspace_id === preferred)) {
+          preferred = available[0]?.workspace_id || '';
+          if (preferred) window.localStorage.setItem('smm-workspace-id', preferred);
+        }
+        if (!cancelled) setWorkspaces(available);
 
         const result = await workspaceRequest<{workspace?: Workspace}>('bootstrap');
         if (!cancelled && result.workspace) setWorkspace(result.workspace);
@@ -71,7 +82,28 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <Link className={active==='media'?'nav-link active':'nav-link'} href="/media">Медиа</Link>
         {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Админ</Link>}
       </nav>
-      <div className="top-actions"><Link className="workspace-chip" href="/team"><span className="workspace-dot"/>{workspace?.workspace_name??'Команда'}</Link><button className="theme" onClick={()=>{const next=theme==='light'?'dark':'light';setTheme(next);window.localStorage.setItem('smm-theme',next)}}>{theme==='light'?'☾':'☀'} Тема</button><button className="profile-button" onClick={signOut}>Выйти</button></div>
+      <div className="top-actions">
+        <select
+          className="workspace-switcher"
+          value={workspace?.workspace_id || ''}
+          onChange={event => {
+            const next = event.target.value;
+            if (!next) return;
+            window.localStorage.setItem('smm-workspace-id', next);
+            window.location.reload();
+          }}
+          aria-label="Выбор профиля"
+        >
+          {workspaces.map(item => (
+            <option key={item.workspace_id} value={item.workspace_id}>
+              {item.workspace_kind === 'personal' ? 'Личный · ' : 'Команда · '}{item.workspace_name}
+            </option>
+          ))}
+        </select>
+        <Link className="workspace-chip" href="/team"><span className="workspace-dot"/>{workspace?.workspace_name??'Рабочее пространство'}</Link>
+        <button className="theme" onClick={()=>{const next=theme==='light'?'dark':'light';setTheme(next);window.localStorage.setItem('smm-theme',next)}}>{theme==='light'?'☾':'☀'} Тема</button>
+        <button className="profile-button" onClick={signOut}>Выйти</button>
+      </div>
     </header>
     {children}
     <a className="floating-contact" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться в Telegram">Telegram · @truegromle</a>
