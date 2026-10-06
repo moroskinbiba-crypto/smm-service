@@ -53,19 +53,20 @@ export async function telegramPublish(secret: Secret, chatId: string, body: stri
     if (media.length !== 1) throw new Error("Telegram Story требует ровно один фото- или видеофайл");
     const item = media[0];
     if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
-    const content = item.type?.startsWith("video/")
-      ? { type: "video", video: item.signed_url }
-      : { type: "photo", photo: item.signed_url };
-    const result = await jsonResponse(`${base}/postStory`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        business_connection_id: businessConnectionId,
-        content,
-        active_period: 86400,
-        caption: body || undefined,
-      }),
-    });
+    const isVideo = item.type?.startsWith("video/");
+    if (isVideo && (Number(item.size ?? 0) > 30 * 1024 * 1024)) throw new Error("Telegram Story video не должен превышать 30 МБ");
+    if (!isVideo && Number(item.size ?? 0) > 10 * 1024 * 1024) throw new Error("Telegram Story фото не должно превышать 10 МБ");
+    const content = isVideo
+      ? { type: "video", video: "attach://story_file" }
+      : { type: "photo", photo: "attach://story_file" };
+    if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
+    const form = new FormData();
+    form.append("business_connection_id", businessConnectionId);
+    form.append("content", JSON.stringify(content));
+    form.append("active_period", "86400");
+    if (body) form.append("caption", body);
+    form.append("story_file", await fetchBlob(item.signed_url), item.name || (isVideo ? "story.mp4" : "story.jpg"));
+    const result = await uploadMultipart(`${base}/postStory`, form);
     return String(result.result?.id ?? Date.now());
   }
 
