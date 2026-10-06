@@ -194,12 +194,14 @@ export default function AccountsPage(){
           </div>}
 
           {platform==='telegram'&&<div className="max-connect-choice">
+            <div className="connection-method-heading"><strong>Способ подключения Telegram</strong><small>Выберите один из двух вариантов</small></div>
             <div className="max-method-tabs">
-              <button className={telegramMode==='own_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('own_bot')}><strong>С помощью токена вашего Telegram-бота</strong><small>Классический способ для каналов</small></button>
-              <button className={telegramMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('service_bot')}><strong>Через бота SMM-сервиса</strong><small>Без копирования токена</small></button>
+              <button className={telegramMode==='own_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('own_bot')}><strong>1. Ваш Telegram-бот</strong><small>Вы создаёте и даёте сервису токен. Максимум контроля.</small></button>
+              <button className={telegramMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('service_bot')}><strong>2. Бот SMM-сервиса</strong><small>Без копирования токена — подключение через одноразовый код.</small></button>
             </div>
           </div>
           {platform==='telegram'&&telegramMode==='service_bot'&&<div className="max-service-form">
+            <div className="connect-method-badge">Вариант 2 · Бот SMM-сервиса</div>
             <p className="section-copy">Выберите, что хотите подключить через нашего Telegram-бота.</p>
             <div className="max-method-tabs">
               <button className={telegramServiceMode==='channel'?'max-method active':'max-method'} onClick={()=>setTelegramServiceMode('channel')}><strong>Telegram-канал</strong><small>Постинг обычных публикаций</small></button>
@@ -227,9 +229,10 @@ export default function AccountsPage(){
               <small>{telegramConnect.instructions}</small>
             </div>}
           </div>          {platform==='max'&&<div className="max-connect-choice">
+            <div className="connection-method-heading"><strong>Способ подключения MAX</strong><small>Выберите один из двух вариантов</small></div>
             <div className="max-method-tabs">
-              <button className={maxMode==='token'?'max-method active':'max-method'} onClick={()=>setMaxMode('token')}><strong>С помощью токена вашего MAX business-бота</strong><small>Рекомендуемый способ</small></button>
-              <button className={maxMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setMaxMode('service_bot')}><strong>Через добавление бота в канал</strong><small>Без копирования токена</small></button>
+              <button className={maxMode==='token'?'max-method active':'max-method'} onClick={()=>setMaxMode('token')}><strong>1. Токен вашего MAX-бота</strong><small>Вы создаёте бота и вводите его токен.</small></button>
+              <button className={maxMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setMaxMode('service_bot')}><strong>2. Бот SMM-сервиса</strong><small>Добавляете нашего бота в канал и вводите только одноразовый код.</small></button>
             </div>
           </div>}
 
@@ -268,6 +271,7 @@ export default function AccountsPage(){
             <button className="primary" disabled={busy||!token||!externalId} onClick={()=>void connectManual()}>{busy?'Проверяем и подключаем…':'Подключить Telegram'}</button>
           </>}
           {platform==='max'&&maxMode==='service_bot'&&<div className="max-service-form">
+            <div className="connect-method-badge">Вариант 2 · Бот SMM-сервиса</div>
             <p className="section-copy">Добавьте служебного MAX-бота в канал как администратора. Затем отправьте в канале команду с одноразовым кодом — сервис сам увидит channel ID и подключит канал.</p>
             <ol className="max-steps"><li>Нажмите «Получить код подключения».</li><li>Добавьте служебного бота <b>{maxConnect?.bot_username ? '@'+maxConnect.bot_username.replace(/^@/,'') : 'служебного бота'}</b> в канал и назначьте ему права администратора.</li><li>Отправьте в канале сообщение <b>/connect КОД</b>.</li><li>Через несколько секунд канал появится в списке аккаунтов.</li></ol>
             <button className="primary" disabled={busy} onClick={()=>void startMaxServiceBot()}>{busy?'Готовим…':'Получить код подключения'}</button>
