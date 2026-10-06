@@ -48,8 +48,8 @@ export async function appRequest<T = unknown>(action: string, payload: Record<st
 
 export async function uploadMedia(workspaceId: string, file: File) {
   const supabase = createClient();
-  if (!/^image\/(jpeg|png|webp|gif|avif)|video\/(mp4|webm|quicktime)$/.test(file.type)) {
-    throw new Error('Поддерживаются JPG, PNG, WebP, GIF, AVIF, MP4, WebM и MOV');
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    throw new Error('Поддерживаются только JPG, PNG и WebP');
   }
   if (file.size > 50 * 1024 * 1024) {
     throw new Error('Размер файла не должен превышать 50 МБ');
