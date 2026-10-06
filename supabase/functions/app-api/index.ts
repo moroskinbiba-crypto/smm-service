@@ -833,6 +833,28 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
         }
         return json({ ok: true });
+      case "reschedule-post":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const postId = String(body.post_id || "");
+          const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : "";
+          if (!scheduledAt || new Date(scheduledAt).getTime() <= Date.now()) throw new Error("Новое время должно быть в будущем");
+          const { data: post, error: loadError } = await ctx.admin.from("posts")
+            .select("id,status")
+            .eq("id", postId)
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (loadError) throw loadError;
+          if (!post) throw new Error("Публикация не найдена");
+          if (["publishing","published"].includes(post.status)) throw new Error("Эту публикацию нельзя перенести");
+          const { error } = await ctx.admin.from("posts").update({
+            scheduled_at: scheduledAt,
+            status: "scheduled",
+            updated_at: new Date().toISOString(),
+          }).eq("id", postId);
+          if (error) throw error;
+          return json({ ok: true, scheduled_at: scheduledAt });
+        }
       case "cancel-post":
         if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
         {
