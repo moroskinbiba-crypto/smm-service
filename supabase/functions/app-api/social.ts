@@ -40,13 +40,13 @@ export async function telegramHealth(secret: Secret, externalId?: string) {
   return { display_name: me.result?.first_name || me.result?.username || "Telegram Bot", username: me.result?.username ? `@${me.result.username}` : null };
 }
 
-export async function telegramPublish(secret: Secret, chatId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
+export async function telegramPublish(secret: Secret, chatId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!secret.access_token) throw new Error("Telegram token не указан");
   if (!chatId) throw new Error("Не указан chat_id Telegram");
   const base = `https://api.telegram.org/bot${secret.access_token}`;
 
   if (publicationType === "story") {
-    const businessConnectionId = typeof secret.client_secret === "string" ? secret.client_secret : "";
+    const businessConnectionId = typeof metadata.business_connection_id === "string" ? metadata.business_connection_id : "";
     if (!businessConnectionId) {
       throw new Error("Для Telegram Stories нужен Business connection ID подключённого Telegram Business аккаунта");
     }
@@ -400,7 +400,7 @@ export async function healthcheck(platform: Platform, secret: Secret, externalId
 
 export async function publish(platform: Platform, secret: Secret, externalId: string, body: string, media: MediaItem[], metadata: Record<string, unknown>, publicationType: PublicationType = "feed") {
   switch (platform) {
-    case "telegram": return telegramPublish(secret, externalId, body, media, publicationType);
+    case "telegram": return telegramPublish(secret, externalId, body, media, publicationType, metadata);
     case "vk": return vkPublish(secret, externalId, body, media, publicationType);
     case "max": return maxPublish(secret, externalId, body, media, publicationType);
     case "ok": return okPublish(secret, externalId, body, metadata, media, publicationType);
