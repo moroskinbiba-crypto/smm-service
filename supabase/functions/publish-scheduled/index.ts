@@ -41,7 +41,7 @@ async function processRecurrences(admin: any) {
     }
 
     const { data: source, error: sourceError } = await admin.from("posts")
-      .select("id,user_id,body,media,post_targets(social_account_id,platform)")
+      .select("id,user_id,body,media,post_targets(social_account_id,platform,publication_type)")
       .eq("id", recurrence.source_post_id)
       .eq("workspace_id", recurrence.workspace_id)
       .maybeSingle();
@@ -67,6 +67,7 @@ async function processRecurrences(admin: any) {
       post_id: cloned.id,
       social_account_id: target.social_account_id,
       platform: target.platform,
+      publication_type: target.publication_type || "feed",
       status: "pending",
     }));
     if (targets.length) {
