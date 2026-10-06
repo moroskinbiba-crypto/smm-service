@@ -260,6 +260,53 @@ async function loadPosts(ctx: any, body: any) {
   return { posts, workspace: ctx.workspace };
 }
 
+async function aiGenerate(inputText: string, mode: string, platform?: string) {
+  const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+  if (!apiKey) {
+    throw new Error("AI не настроен: добавьте OPENAI_API_KEY в секреты Edge Function");
+  }
+
+  const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.5";
+  const instructions: Record<string,string> = {
+    improve: "Улучши исходный текст для SMM: сделай яснее, сильнее и живее, не меняя факты. Сохрани язык исходника.",
+    shorten: "Сократи текст примерно вдвое, сохранив смысл, факты и призыв к действию.",
+    sales: "Перепиши текст более продающе, но без агрессивного маркетинга и выдуманных обещаний.",
+    headline: "Предложи 5 сильных вариантов короткого заголовка для этой публикации. Один вариант в строке.",
+    variants: "Сделай 3 разных варианта публикации на основе исходника. Каждый вариант отдели пустой строкой.",
+    adapt: "Адаптируй текст под конкретную площадку, учитывая её формат и привычный стиль аудитории.",
+  };
+  const instruction = instructions[mode] ?? instructions.improve;
+  const platformHint = platform ? "Площадка: " + platform + "." : "";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": "Bearer " + apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      instructions: instruction + " " + platformHint + " Не добавляй пояснения о своей работе. Верни только готовый результат.",
+      input: inputText,
+      max_output_tokens: 1200,
+    }),
+  });
+
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Ошибка AI API");
+  }
+  const outputText = typeof data?.output_text === "string"
+    ? data.output_text
+    : Array.isArray(data?.output)
+      ? data.output.flatMap((item: any) => Array.isArray(item?.content) ? item.content.map((part: any) => part?.text).filter(Boolean) : []).join("\n")
+      : "";
+  if (!outputText.trim()) throw new Error("AI не вернул текст");
+  return outputText.trim();
+}
+
 async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
   let inserted = 0;
 
@@ -785,6 +832,17 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "ai-generate":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const text = typeof body.text === "string" ? body.text.trim() : "";
+          const mode = typeof body.mode === "string" ? body.mode : "improve";
+          const platform = typeof body.platform === "string" ? body.platform : undefined;
+          if (!text) throw new Error("Введите исходный текст");
+          if (text.length > 12000) throw new Error("Исходный текст слишком длинный");
+          const generated = await aiGenerate(text, mode, platform);
+          return json({ ok: true, text: generated, mode, platform: platform ?? null });
+        }
       case "bulk-delete-posts":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
