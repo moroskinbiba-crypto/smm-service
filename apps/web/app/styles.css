@@ -305,3 +305,13 @@
 .telegram-notify-connect{display:grid;gap:8px;max-width:460px}
 .telegram-start-link{display:inline-flex;width:max-content;text-decoration:none;align-items:center}
 @media (max-width:700px){.floating-contact{right:10px;bottom:10px;font-size:11px}.social-card-logo{width:20px;height:20px;min-width:20px}.format-stat{min-width:132px}}
+
+.network-logo{display:inline-flex;align-items:center;justify-content:center;font-weight:900;letter-spacing:-.05em}
+.network-logo-telegram{color:#fff;background:#2aabee;border-radius:8px}
+.network-logo-vk{color:#fff;background:#0077ff;border-radius:8px}
+.network-logo-max{color:#fff;background:#111;border-radius:8px}
+.network-logo-ok{color:#fff;background:#ee8208;border-radius:8px}
+.network-logo-instagram{color:#fff;background:linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045);border-radius:8px}
+.platform-tab .network-logo{width:24px;height:24px;font-size:10px;margin-right:6px}
+.connected-icon.network-logo{width:30px;height:30px;font-size:12px}
+.network-icon.network-logo{width:25px;height:25px;font-size:10px}
