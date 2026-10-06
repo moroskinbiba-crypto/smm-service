@@ -73,6 +73,18 @@ export default function TeamPage() {
     }
   }
 
+  async function updateRole(userId: string, role: string) {
+    setBusy(true); setMessage('');
+    try {
+      await workspaceRequest('set-member-role', { user_id: userId, role });
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не удалось изменить роль');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const activeInvites = useMemo(() => invites.filter(item => !item.used_at && new Date(item.expires_at) > new Date()), [invites]);
 
   return (
@@ -86,7 +98,17 @@ export default function TeamPage() {
           <section className="card">
             <div className="card-head"><h2>Участники</h2><span>{members.length}</span></div>
             <div className="member-list">
-              {members.map(member => <div className="member-row" key={member.user_id}><div className="member-avatar">{(member.display_name ?? 'П').slice(0, 1).toUpperCase()}</div><div className="member-main"><strong>{member.display_name ?? 'Пользователь'}</strong><span>{roleLabel(member.role)}</span></div></div>)}
+              {members.map(member => <div className="member-row" key={member.user_id}>
+  <div className="member-avatar">{(member.display_name ?? 'П').slice(0, 1).toUpperCase()}</div>
+  <div className="member-main"><strong>{member.display_name ?? 'Пользователь'}</strong><span>{roleLabel(member.role)}</span></div>
+  {canInvite && member.role !== 'owner' && <select className="member-role-select" value={member.role} disabled={busy} onChange={event => void updateRole(member.user_id, event.target.value)}>
+    <option value="admin">Администратор</option>
+    <option value="editor">Редактор</option>
+    <option value="publisher">Публикатор</option>
+    <option value="approver">Согласующий</option>
+    <option value="viewer">Наблюдатель</option>
+  </select>}
+</div>)}
               {!members.length && <div className="empty small-empty">Участников пока нет.</div>}
             </div>
           </section>
