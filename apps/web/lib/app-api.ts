@@ -13,6 +13,7 @@ export type ApiPost = {
     id: string;
     social_account_id: string;
     platform: string;
+    publication_type?: 'feed' | 'reel' | 'story';
     status: string;
     last_error: string | null;
     published_at: string | null;
