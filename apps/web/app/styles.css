@@ -188,3 +188,17 @@
 .topic-cloud span{padding:7px 10px;border-radius:999px;background:#eef1f5;font-weight:700}
 .dark .topic-cloud span{background:#242832}
 .topic-cloud small{opacity:.5;font-size:10px}
+
+.notification-list{display:grid;gap:0;overflow:hidden}
+.notification-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:start;padding:15px;border:0;border-bottom:1px solid #e6e9ef;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.dark .notification-row{border-color:#2a2e38}
+.notification-row.unread{background:#f6f8fb}
+.dark .notification-row.unread{background:#20242c}
+.notification-row:hover{background:#eef1f5}
+.dark .notification-row:hover{background:#242832}
+.notification-icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:#eef1f5}
+.dark .notification-icon{background:#252932}
+.notification-row>div:nth-child(2){display:grid;gap:4px}
+.notification-row strong{font-size:13px}
+.notification-row span{font-size:12px;opacity:.65;line-height:1.45}
+.notification-row small{font-size:10px;opacity:.45}
