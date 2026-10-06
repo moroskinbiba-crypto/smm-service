@@ -59,7 +59,11 @@ async function userContext(req: Request) {
 
 async function authContext(req: Request) {
   const base = await userContext(req);
-  const { data, error } = await base.admin.rpc("get_workspace_for_user", { p_user_id: base.user.id });
+  const selectedWorkspaceId = (req.headers.get("x-workspace-id") || "").trim() || null;
+  const { data, error } = await base.admin.rpc("get_workspace_for_user", {
+    p_user_id: base.user.id,
+    p_workspace_id: selectedWorkspaceId,
+  });
   if (error) throw error;
   const workspace = Array.isArray(data) ? data[0] : data;
   if (!workspace?.workspace_id) throw new Error("Рабочее пространство не настроено");
@@ -857,6 +861,19 @@ Deno.serve(async (req: Request) => {
           teams,
         });
       }
+      case "admin-set-workspace-limit": {
+        await requirePlatformAdmin(ctx);
+        const workspaceId = String(body.workspace_id || "");
+        const maxMembers = Number(body.max_members);
+        if (!workspaceId || !Number.isInteger(maxMembers)) throw new Error("Некорректный лимит команды");
+        const { data, error } = await ctx.admin.rpc("admin_set_workspace_limit", {
+          p_workspace_id: workspaceId,
+          p_max_members: maxMembers,
+        });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        return json({ ok: true, workspace_id: workspaceId, max_members: row?.max_members ?? maxMembers });
+      }
       case "admin-suspend-user": {
         await requirePlatformAdmin(ctx);
         const targetUserId = String(body.user_id || "");
@@ -944,6 +961,99 @@ Deno.serve(async (req: Request) => {
           if (targetError) throw targetError;
         }
         return json({ ok: true });
+      case "list-account-groups":
+        {
+          const { data: groups, error: groupError } = await ctx.admin.from("account_groups")
+            .select("id,name,description,created_by,created_at,updated_at")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .order("name", { ascending: true });
+          if (groupError) throw groupError;
+          const ids = (groups ?? []).map((g:any)=>g.id);
+          let members:any[] = [];
+          if (ids.length) {
+            const { data, error } = await ctx.admin.from("account_group_members")
+              .select("group_id,social_account_id")
+              .in("group_id", ids);
+            if (error) throw error;
+            members = data ?? [];
+          }
+          return json({
+            ok: true,
+            groups: (groups ?? []).map((g:any)=>({
+              ...g,
+              account_ids: members.filter((m:any)=>m.group_id===g.id).map((m:any)=>m.social_account_id),
+            })),
+          });
+        }
+      case "create-account-group":
+      case "update-account-group":
+        {
+          if (!["owner","admin","editor"].includes(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const groupId = body.action === "update-account-group" ? String(body.group_id || "") : "";
+          const name = typeof body.name === "string" ? body.name.trim() : "";
+          const description = typeof body.description === "string" ? body.description.trim() : "";
+          const accountIds = Array.isArray(body.account_ids)
+            ? [...new Set(body.account_ids.map(String).filter(Boolean))].slice(0, 100)
+            : [];
+          if (!name) throw new Error("Введите название группы");
+          if (groupId) {
+            const { data: existing, error: existingError } = await ctx.admin.from("account_groups")
+              .select("id")
+              .eq("id", groupId)
+              .eq("workspace_id", ctx.workspace.workspace_id)
+              .maybeSingle();
+            if (existingError) throw existingError;
+            if (!existing) throw new Error("Группа не найдена");
+          }
+
+          const { data: accountsForGroup, error: accountsError } = await ctx.admin.from("social_accounts")
+            .select("id")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .in("id", accountIds);
+          if (accountsError) throw accountsError;
+          if ((accountsForGroup ?? []).length !== accountIds.length) throw new Error("Некоторые аккаунты не принадлежат текущему рабочему пространству");
+
+          let finalGroupId = groupId;
+          if (!finalGroupId) {
+            const { data: created, error } = await ctx.admin.from("account_groups")
+              .insert({
+                workspace_id: ctx.workspace.workspace_id,
+                name,
+                description: description || null,
+                created_by: ctx.user.id,
+              })
+              .select("id")
+              .single();
+            if (error) throw error;
+            finalGroupId = created.id;
+          } else {
+            const { error } = await ctx.admin.from("account_groups")
+              .update({ name, description: description || null, updated_at: new Date().toISOString() })
+              .eq("id", finalGroupId)
+              .eq("workspace_id", ctx.workspace.workspace_id);
+            if (error) throw error;
+            await ctx.admin.from("account_group_members").delete().eq("group_id", finalGroupId);
+          }
+
+          if (accountIds.length) {
+            const { error } = await ctx.admin.from("account_group_members").insert(accountIds.map((id:string)=>({
+              group_id: finalGroupId,
+              social_account_id: id,
+            })));
+            if (error) throw error;
+          }
+          return json({ ok: true, group_id: finalGroupId });
+        }
+      case "delete-account-group":
+        {
+          if (!["owner","admin","editor"].includes(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const groupId = String(body.group_id || "");
+          const { error } = await ctx.admin.from("account_groups").delete()
+            .eq("id", groupId)
+            .eq("workspace_id", ctx.workspace.workspace_id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
       case "list-accounts":
         {
           const { data, error } = await ctx.admin.from("social_accounts")
