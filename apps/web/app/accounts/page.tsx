@@ -7,8 +7,8 @@ import { appRequest, type SocialAccount } from '../../lib/app-api';
 type Platform='telegram'|'vk'|'max'|'ok'|'instagram';
 
 const meta: Record<Platform,{name:string;icon:string;help:string}> = {
-  telegram:{name:'Telegram',icon:'✈️',help:'Два способа: токен вашего бота или бот SMM-сервиса. Для Telegram Business Stories используйте отдельный Business-сценарий — connection ID вводить не нужно.'},
-  vk:{name:'VK',icon:'VK',help:'Удобнее войти через VK OAuth и выбрать нужное сообщество прямо в сервисе.'},
+  telegram:{name:'Telegram',icon:'➤',help:'Два способа: токен вашего бота или бот SMM-сервиса. Для Telegram Business Stories используйте отдельный Business-сценарий — connection ID вводить не нужно.'},
+  vk:{name:'VK',icon:'vk',help:'Удобнее войти через VK OAuth и выбрать нужное сообщество прямо в сервисе.'},
   max:{name:'MAX',icon:'M',help:'Два способа: токен вашего бота или подключение через служебного бота, добавленного в канал.'},
   ok:{name:'Одноклассники',icon:'OK',help:'OAuth access token + application key/secret + ID группы.'},
   instagram:{name:'Instagram',icon:'◎',help:'Подключаются профессиональные Instagram-аккаунты через Meta и можно выбрать нужный аккаунт.'},
