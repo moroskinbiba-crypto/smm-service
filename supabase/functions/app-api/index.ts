@@ -65,6 +65,15 @@ async function signedMedia(admin: any, media: unknown) {
   }));
 }
 
+async function deleteStoredMedia(admin: any, media: unknown) {
+  const paths = (Array.isArray(media) ? media : [])
+    .map((item: any) => typeof item?.path === "string" ? item.path : "")
+    .filter(Boolean);
+
+  if (!paths.length) return;
+  await admin.storage.from("media").remove(paths);
+}
+
 async function getSecret(admin: any, accountId: string) {
   const { data, error } = await admin.rpc("get_social_account_secret", { p_social_account_id: accountId });
   if (error) throw error;
@@ -101,6 +110,9 @@ async function savePost(ctx: any, body: any) {
   const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null;
   const targetAccounts = await requireTargets(ctx.admin, ctx.workspace.workspace_id, Array.isArray(body.target_account_ids) ? body.target_account_ids : []);
 
+  if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now() && body.status !== "draft") {
+    throw new Error("Дата и время публикации должны быть в будущем");
+  }
   const desiredStatus = body.status === "canceled" ? "canceled" : (scheduledAt ? "scheduled" : "draft");
   const payload = {
     workspace_id: ctx.workspace.workspace_id,
@@ -147,19 +159,48 @@ async function savePost(ctx: any, body: any) {
 async function loadPosts(ctx: any, body: any) {
   const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 45 * 86400000).toISOString();
   const to = body.to ? new Date(body.to).toISOString() : new Date(Date.now() + 90 * 86400000).toISOString();
-  const { data, error } = await ctx.admin.from("posts")
-    .select("id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))")
-    .eq("workspace_id", ctx.workspace.workspace_id)
-    .order("scheduled_at", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(500);
-  if (error) throw error;
 
-  const posts = await Promise.all((data ?? []).map(async (post: any) => ({
-    ...post,
-    media: await signedMedia(ctx.admin, post.media),
-  })));
-  return posts;
+  const select = "id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))";
+
+  const [scheduledResult, unscheduledResult] = await Promise.all([
+    ctx.admin.from("posts")
+      .select(select)
+      .eq("workspace_id", ctx.workspace.workspace_id)
+      .not("scheduled_at", "is", null)
+      .gte("scheduled_at", from)
+      .lte("scheduled_at", to)
+      .order("scheduled_at", { ascending: true })
+      .limit(300),
+    ctx.admin.from("posts")
+      .select(select)
+      .eq("workspace_id", ctx.workspace.workspace_id)
+      .is("scheduled_at", null)
+      .gte("created_at", from)
+      .lte("created_at", to)
+      .order("created_at", { ascending: false })
+      .limit(300),
+  ]);
+
+  if (scheduledResult.error) throw scheduledResult.error;
+  if (unscheduledResult.error) throw unscheduledResult.error;
+
+  const byId = new Map<string, any>();
+  for (const post of [...(scheduledResult.data ?? []), ...(unscheduledResult.data ?? [])]) byId.set(post.id, post);
+
+  const posts = await Promise.all(
+    [...byId.values()]
+      .sort((a: any, b: any) => {
+        const ad = new Date(a.scheduled_at ?? a.created_at).getTime();
+        const bd = new Date(b.scheduled_at ?? b.created_at).getTime();
+        return ad - bd;
+      })
+      .map(async (post: any) => ({
+        ...post,
+        media: await signedMedia(ctx.admin, post.media),
+      })),
+  );
+
+  return { posts, workspace: ctx.workspace };
 }
 
 async function publishPost(ctx: any, postId: string) {
@@ -225,8 +266,35 @@ Deno.serve(async (req: Request) => {
       case "delete-post":
         if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
         {
+          const { data: post, error: loadError } = await ctx.admin.from("posts")
+            .select("id,media,status")
+            .eq("id", body.post_id)
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (loadError) throw loadError;
+          if (!post) throw new Error("Публикация не найдена");
+          if (post.status === "publishing") throw new Error("Нельзя удалить публикацию во время отправки");
+          await deleteStoredMedia(ctx.admin, post.media);
           const { error } = await ctx.admin.from("posts").delete().eq("id", body.post_id).eq("workspace_id", ctx.workspace.workspace_id);
           if (error) throw error;
+        }
+        return json({ ok: true });
+      case "cancel-post":
+        if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+        {
+          const { data: post, error: loadError } = await ctx.admin.from("posts")
+            .select("id,status")
+            .eq("id", body.post_id)
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (loadError) throw loadError;
+          if (!post) throw new Error("Публикация не найдена");
+          if (!["scheduled","publishing"].includes(post.status)) throw new Error("Отменить можно только запланированную или выполняющуюся публикацию");
+          if (post.status === "publishing") throw new Error("Публикация уже отправляется");
+          const { error: postError } = await ctx.admin.from("posts").update({ status: "canceled", updated_at: new Date().toISOString() }).eq("id", body.post_id);
+          if (postError) throw postError;
+          const { error: targetError } = await ctx.admin.from("post_targets").update({ status: "canceled", last_error: null, updated_at: new Date().toISOString() }).eq("post_id", body.post_id);
+          if (targetError) throw targetError;
         }
         return json({ ok: true });
       case "list-accounts":
