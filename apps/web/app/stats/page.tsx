@@ -21,8 +21,11 @@ type Summary = {
   avg_engagement_per_post: number;
   success_rate: number;
   publications_per_day: number;
+  reels: number;
+  clips: number;
 };
 
+type Format = { platform:string; format:string; published:number; views:number; likes:number; comments:number; reposts:number };
 type Platform = {
   platform: string;
   published: number;
@@ -76,6 +79,7 @@ export default function StatsPage() {
   const [customTo, setCustomTo] = useState('');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [formats, setFormats] = useState<Format[]>([]);
   const [daily, setDaily] = useState<Daily[]>([]);
   const [comparison, setComparison] = useState<Comparison|null>(null);
   const [topPosts, setTopPosts] = useState<TopPost[]>([]);
@@ -90,12 +94,13 @@ export default function StatsPage() {
     if (start.getTime() > end.getTime()) {
       throw new Error('Начало периода не может быть позже конца');
     }
-    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[]; by_account: BenchmarkAccount[] }>(
+    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; by_format: Format[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[]; by_account: BenchmarkAccount[] }>(
       'stats',
       { from: start.toISOString(), to: end.toISOString() },
     );
     setSummary(r.summary);
     setPlatforms(r.by_platform ?? []);
+    setFormats(r.by_format ?? []);
     setDaily(r.daily ?? []);
     setComparison(r.comparison ?? null);
     setTopPosts(r.top_posts ?? []);
@@ -138,6 +143,8 @@ export default function StatsPage() {
     ['ER по просмотрам', percent(summary.engagement_rate), 'вовлечённость / просмотры'],
     ['Средние просмотры', number(summary.avg_views_per_post), 'на опубликованный target'],
     ['Успешность публикаций', percent(summary.success_rate), 'успешные / успешные + ошибки'],
+    ['Reels', number(summary.reels), 'опубликовано'],
+    ['VK Клипы', number(summary.clips), 'опубликовано'],
   ] : [];
 
   const maxDailyViews = useMemo(
@@ -179,6 +186,11 @@ export default function StatsPage() {
             </section>
           ))}
         </div>
+
+        <section className="card">
+          <div className="card-head"><h2>Форматы</h2><span>Reels и VK Клипы учитываются отдельно</span></div>
+          <div className="format-stats">{formats.map(item=><div className="format-stat" key={item.platform+item.format}><strong>{item.platform === 'vk' ? 'VK' : item.platform === 'instagram' ? 'Instagram' : item.platform}</strong><span>{item.format === 'clip' ? 'Клипы' : item.format === 'reel' ? 'Reels' : item.format === 'story' ? 'Stories' : 'Посты'}</span><b>{number(item.published)}</b></div>)}{!formats.length&&<div className="empty small-empty">Данных по форматам пока нет.</div>}</div>
+        </section>
 
         <section className="card stats-chart-card">
           <div className="card-head">
