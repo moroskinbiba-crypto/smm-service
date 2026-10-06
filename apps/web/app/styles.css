@@ -225,3 +225,5 @@
 .member-role-select,.invite-role-select{padding:9px 10px;border:1px solid #dfe3ea;border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:12px}
 .dark .member-role-select,.dark .invite-role-select{border-color:#353945}
 .invite-role-label{display:grid;gap:6px;font-size:12px;font-weight:700;margin:14px 0 10px}
+
+.stats-custom-period{display:flex;gap:12px;align-items:end;margin-bottom:20px}.stats-custom-period label{display:grid;gap:6px;font-size:12px;font-weight:700}.stats-custom-period input{padding:10px;border:1px solid #dfe3ea;border-radius:10px;background:transparent;color:inherit}.dark .stats-custom-period input{border-color:#353945}
