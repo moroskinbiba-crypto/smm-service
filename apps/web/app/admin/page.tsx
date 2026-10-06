@@ -155,17 +155,13 @@ export default function AdminPage() {
                 <span className={user.suspended_at ? 'admin-status suspended' : 'admin-status active'}>
                   {user.suspended_at ? 'Приостановлен' : 'Активен'}
                 </span>
-                {user.is_admin ? (
-                  <span className="admin-protected">Администратор</span>
-                ) : (
-                  <button
-                    className={user.suspended_at ? 'secondary' : 'secondary danger-button'}
-                    disabled={busyUser === user.id}
-                    onClick={() => void setSuspended(user, !user.suspended_at)}
-                  >
-                    {busyUser === user.id ? 'Сохраняем…' : user.suspended_at ? 'Возобновить' : 'Приостановить'}
-                  </button>
-                )}
+                <button
+                  className={user.suspended_at ? 'secondary' : 'secondary danger-button'}
+                  disabled={busyUser === user.id}
+                  onClick={() => void setSuspended(user, !user.suspended_at)}
+                >
+                  {busyUser === user.id ? 'Сохраняем…' : user.suspended_at ? 'Возобновить' : 'Приостановить'}
+                </button>
               </div>
             ))}
             {!filteredUsers.length && <div className="empty small-empty">Пользователи не найдены.</div>}
