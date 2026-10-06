@@ -17,16 +17,25 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
     const saved = window.localStorage.getItem('smm-theme');
     if (saved === 'dark') setTheme('dark');
     let cancelled = false;
-    void supabase.auth.getUser().then(({data}) => {
-      if (!data.user) {
-        window.location.assign('/auth');
-        return;
+
+    async function initialize() {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (!authData.user) {
+          window.location.assign('/auth');
+          return;
+        }
+
+        const result = await workspaceRequest<{workspace?: Workspace}>('bootstrap');
+        if (!cancelled && result.workspace) setWorkspace(result.workspace);
+      } catch {
+        // Keep the shell usable; protected API calls will surface real errors.
+      } finally {
+        if (!cancelled) setAuthReady(true);
       }
-      return workspaceRequest<{workspace?:Workspace}>('bootstrap');
-    }).then(result => {
-      if (!cancelled && result?.workspace) setWorkspace(result.workspace);
-      if (!cancelled) setAuthReady(true);
-    }).catch(() => { if (!cancelled) setAuthReady(true); });
+    }
+
+    void initialize();
     return () => { cancelled = true; };
   }, [supabase]);
 
