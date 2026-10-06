@@ -932,6 +932,27 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           return json({ ok: true, accounts: data ?? [] });
         }
+      case "max-connect-info":
+        {
+          const botToken = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+          const botUsername = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
+          if (!botToken || !botUsername) {
+            return json({ ok: true, configured: false });
+          }
+          let bot: any = {};
+          try { bot = await jsonResponseForAppApi("https://platform-api2.max.ru/me", { headers: { Authorization: botToken } }); } catch {}
+          return json({ ok: true, configured: true, bot_username: bot.username || botUsername, bot_name: bot.name || botUsername });
+        }
+      case "max-resolve-chat":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const chatId = String(body.chat_id || "").trim();
+          const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+          if (!token || !chatId) throw new Error("Не настроен служебный MAX-бот или не указан chat_id");
+          const chat = await jsonResponseForAppApi("https://platform-api2.max.ru/chats/" + encodeURIComponent(chatId), { headers: { Authorization: token } });
+          const admins = await jsonResponseForAppApi("https://platform-api2.max.ru/chats/" + encodeURIComponent(chatId) + "/members/me", { headers: { Authorization: token } }).catch(()=>null);
+          return json({ ok: true, chat: { chat_id: String(chat.chat_id ?? chat.id ?? chatId), title: chat.title || chat.name || "MAX", type: chat.type || null, bot_member: admins } });
+        }
       case "oauth-vk-start":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
