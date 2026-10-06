@@ -17,7 +17,7 @@ function json(body: Record<string, unknown>, status = 200) {
 
 const platforms = new Set(["telegram", "vk", "max", "ok"]);
 
-async function authContext(req: Request) {
+async function userContext(req: Request) {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!url || !serviceRoleKey) throw new Error("Server configuration is incomplete");
@@ -30,11 +30,40 @@ async function authContext(req: Request) {
   const { data: { user }, error: userError } = await admin.auth.getUser(jwt);
   if (userError || !user) throw Object.assign(new Error("Unauthorized"), { status: 401 });
 
-  const { data, error } = await admin.rpc("get_workspace_for_user", { p_user_id: user.id });
+  const { data: profile, error: profileError } = await admin.from("profiles")
+    .select("suspended_at,suspended_reason")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (profile?.suspended_at) {
+    throw Object.assign(new Error(profile.suspended_reason || "Аккаунт приостановлен администратором"), { status: 403 });
+  }
+
+  return { admin, user };
+}
+
+async function authContext(req: Request) {
+  const base = await userContext(req);
+  const { data, error } = await base.admin.rpc("get_workspace_for_user", { p_user_id: base.user.id });
   if (error) throw error;
   const workspace = Array.isArray(data) ? data[0] : data;
   if (!workspace?.workspace_id) throw new Error("Рабочее пространство не настроено");
-  return { admin, user, workspace };
+  return { ...base, workspace };
+}
+
+async function isPlatformAdmin(admin: any, userId: string) {
+  const { data, error } = await admin.from("platform_admins")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.user_id);
+}
+
+async function requirePlatformAdmin(ctx: { admin: any; user: any }) {
+  if (!(await isPlatformAdmin(ctx.admin, ctx.user.id))) {
+    throw Object.assign(new Error("Доступ только для платформенного администратора"), { status: 403 });
+  }
 }
 
 function canEdit(role: string) {
@@ -270,6 +299,138 @@ Deno.serve(async (req: Request) => {
     const ctx = await authContext(req);
     const body = await req.json();
     switch (body.action) {
+      case "admin-check":
+        return json({ ok: true, is_admin: await isPlatformAdmin(ctx.admin, ctx.user.id) });
+      case "admin-overview": {
+        await requirePlatformAdmin(ctx);
+
+        const [usersResult, profilesResult, workspacesResult, membersResult, accountsResult] = await Promise.all([
+          ctx.admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+          ctx.admin.from("profiles").select("id,display_name,avatar_url,suspended_at,suspended_reason,created_at,updated_at"),
+          ctx.admin.from("workspaces").select("id,name,owner_id,timezone,created_at,updated_at").order("created_at", { ascending: true }),
+          ctx.admin.from("workspace_members").select("workspace_id,user_id,role,created_at"),
+          ctx.admin.from("social_accounts").select("id,user_id,workspace_id,platform,external_id,display_name,username,status,created_at,updated_at").order("created_at", { ascending: true }),
+        ]);
+
+        if (usersResult.error) throw usersResult.error;
+        if (profilesResult.error) throw profilesResult.error;
+        if (workspacesResult.error) throw workspacesResult.error;
+        if (membersResult.error) throw membersResult.error;
+        if (accountsResult.error) throw accountsResult.error;
+
+        const authUsers = usersResult.data.users ?? [];
+        const profiles = profilesResult.data ?? [];
+        const profileMap = new Map(profiles.map((profile: any) => [profile.id, profile]));
+        const userMap = new Map(authUsers.map((user: any) => [user.id, user]));
+        const adminIds = new Set<string>();
+
+        const { data: admins, error: adminsError } = await ctx.admin.from("platform_admins").select("user_id");
+        if (adminsError) throw adminsError;
+        for (const row of admins ?? []) adminIds.add(row.user_id);
+
+        const users = authUsers.map((user: any) => {
+          const profile = profileMap.get(user.id) as any;
+          return {
+            id: user.id,
+            email: user.email ?? null,
+            display_name: profile?.display_name ?? null,
+            created_at: user.created_at ?? null,
+            last_sign_in_at: user.last_sign_in_at ?? null,
+            suspended_at: profile?.suspended_at ?? null,
+            suspended_reason: profile?.suspended_reason ?? null,
+            banned_until: user.banned_until ?? null,
+            is_admin: adminIds.has(user.id),
+          };
+        });
+
+        const teams = (workspacesResult.data ?? []).map((workspace: any) => {
+          const members = (membersResult.data ?? [])
+            .filter((member: any) => member.workspace_id === workspace.id)
+            .map((member: any) => {
+              const user = userMap.get(member.user_id) as any;
+              const profile = profileMap.get(member.user_id) as any;
+              return {
+                user_id: member.user_id,
+                email: user?.email ?? null,
+                display_name: profile?.display_name ?? null,
+                role: member.role,
+                created_at: member.created_at,
+              };
+            });
+
+          const accounts = (accountsResult.data ?? [])
+            .filter((account: any) => account.workspace_id === workspace.id)
+            .map((account: any) => {
+              const user = userMap.get(account.user_id) as any;
+              return {
+                id: account.id,
+                user_id: account.user_id,
+                email: user?.email ?? null,
+                platform: account.platform,
+                external_id: account.external_id,
+                display_name: account.display_name,
+                username: account.username,
+                status: account.status,
+                created_at: account.created_at,
+              };
+            });
+
+          const owner = userMap.get(workspace.owner_id) as any;
+          return {
+            id: workspace.id,
+            name: workspace.name,
+            owner_id: workspace.owner_id,
+            owner_email: owner?.email ?? null,
+            timezone: workspace.timezone,
+            created_at: workspace.created_at,
+            members,
+            accounts,
+          };
+        });
+
+        return json({
+          ok: true,
+          summary: {
+            users: users.length,
+            teams: teams.length,
+            social_accounts: accountsResult.data?.length ?? 0,
+            suspended: users.filter((user: any) => user.suspended_at).length,
+          },
+          users,
+          teams,
+        });
+      }
+      case "admin-suspend-user": {
+        await requirePlatformAdmin(ctx);
+        const targetUserId = String(body.user_id || "");
+        if (!targetUserId) throw new Error("Не указан пользователь");
+        if (targetUserId === ctx.user.id) throw new Error("Нельзя приостановить собственный аккаунт");
+
+        const { data: targetAdmin } = await ctx.admin.from("platform_admins")
+          .select("user_id")
+          .eq("user_id", targetUserId)
+          .maybeSingle();
+        if (targetAdmin) throw new Error("Нельзя изменить статус другого администратора");
+
+        const suspended = body.suspended === true;
+        const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : null;
+
+        const { error: profileError } = await ctx.admin.from("profiles")
+          .update({
+            suspended_at: suspended ? new Date().toISOString() : null,
+            suspended_reason: suspended ? reason : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", targetUserId);
+        if (profileError) throw profileError;
+
+        const { error: banError } = await ctx.admin.auth.admin.updateUserById(targetUserId, {
+          ban_duration: suspended ? "876000h" : "none",
+        });
+        if (banError) throw banError;
+
+        return json({ ok: true, user_id: targetUserId, suspended });
+      }
       case "bootstrap":
         return json({ ok: true, workspace: ctx.workspace });
       case "list-posts":
