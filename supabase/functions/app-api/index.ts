@@ -768,7 +768,7 @@ Deno.serve(async (req: Request) => {
         const [usersResult, profilesResult, workspacesResult, membersResult, accountsResult] = await Promise.all([
           ctx.admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
           ctx.admin.from("profiles").select("id,display_name,avatar_url,suspended_at,suspended_reason,created_at,updated_at"),
-          ctx.admin.from("workspaces").select("id,name,owner_id,timezone,created_at,updated_at").order("created_at", { ascending: true }),
+          ctx.admin.from("workspaces").select("id,name,owner_id,timezone,workspace_kind,max_members,created_at,updated_at").order("created_at", { ascending: true }),
           ctx.admin.from("workspace_members").select("workspace_id,user_id,role,created_at"),
           ctx.admin.from("social_accounts").select("id,user_id,workspace_id,platform,external_id,display_name,username,status,created_at,updated_at").order("created_at", { ascending: true }),
         ]);
@@ -843,6 +843,9 @@ Deno.serve(async (req: Request) => {
             owner_id: workspace.owner_id,
             owner_email: owner?.email ?? null,
             timezone: workspace.timezone,
+            workspace_kind: workspace.workspace_kind,
+            max_members: workspace.max_members,
+            member_count: members.length,
             created_at: workspace.created_at,
             members,
             accounts,
