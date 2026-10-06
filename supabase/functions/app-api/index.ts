@@ -2093,12 +2093,12 @@ Deno.serve(async (req: Request) => {
             .limit(5000);
           if (postsError) throw postsError;
 
-          const postIds = (posts ?? []).map((p:any)=>p.id);
+          const rangePostIds = (posts ?? []).map((p:any)=>p.id);
           let targets: any[] = [];
-          if (postIds.length) {
+          if (rangePostIds.length) {
             const { data: targetRows, error: targetsError } = await ctx.admin.from("post_targets")
               .select("id,platform,social_account_id,status,published_at,metrics,post_id,social_accounts(display_name,username)")
-              .in("post_id", postIds);
+              .in("post_id", rangePostIds);
             if (targetsError) throw targetsError;
             targets = targetRows ?? [];
           }
@@ -2283,7 +2283,6 @@ Deno.serve(async (req: Request) => {
           }));
 
           const payload = {
-            ok: true,
             ok: true,
             summary: {
               posts: scopedPosts.length,
