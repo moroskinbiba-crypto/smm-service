@@ -29,7 +29,43 @@ export default function AccountsPage(){
       <label>Токен доступа<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Вставьте токен"/></label>
       <label>{platform==='telegram'?'Chat ID / @username':platform==='vk'?'ID группы':platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder={platform==='telegram'?'@my_channel':'Например, 123456789'}/></label>
       {platform==='ok'&&<><label>Application key<input value={appKey} onChange={e=>setAppKey(e.target.value)}/></label><label>Application secret<input type="password" value={appSecret} onChange={e=>setAppSecret(e.target.value)}/></label></>}
-      <label>Название в сервисе <input value={name} onChange={e=>setName(e.target.value)} placeholder={meta[platform].name}/></label>
+      <label>Название в сервисе <input value={name} onChange={e=>setName(e.target.value)} placeholder={meta[platform].name}/>
+
+      <details className="connect-faq" open>
+        <summary>FAQ: как подключить {meta[platform].name}</summary>
+        <div className="connect-faq-body">
+          {platform==='telegram'&&<>
+            <p><strong>1. Создайте бота.</strong> Откройте Telegram → <b>@BotFather</b> → <b>/newbot</b>. Задайте имя и username бота и скопируйте выданный Bot Token.</p>
+            <p><strong>2. Подготовьте канал или чат.</strong> Добавьте бота в нужный канал/группу и выдайте права администратора, необходимые для публикации.</p>
+            <p><strong>3. Укажите адрес.</strong> Для публичного канала можно использовать <b>@username</b>. Для приватного чата нужен числовой <b>chat_id</b>.</p>
+            <p><strong>4. Подключите.</strong> Вставьте токен и Chat ID / @username выше и нажмите «Подключить аккаунт». Сервис сразу проверит доступ.</p>
+            <a href="https://core.telegram.org/bots" target="_blank" rel="noreferrer">Официальная документация Telegram →</a>
+          </>}
+          {platform==='vk'&&<>
+            <p><strong>1. Откройте сообщество.</strong> Зайдите в нужную группу VK и найдите раздел для работы с API/ключами доступа в настройках сообщества.</p>
+            <p><strong>2. Создайте ключ доступа.</strong> Создайте токен сообщества или пользователя с правами, позволяющими работать со стеной и фотографиями. Для нашего подключения нужны публикация записей и загрузка фото.</p>
+            <p><strong>3. Узнайте ID группы.</strong> Укажите числовой ID сообщества <b>без знака «−»</b>. Его можно посмотреть в адресе/настройках сообщества.</p>
+            <p><strong>4. Подключите.</strong> Вставьте токен и ID группы, затем нажмите «Подключить аккаунт». Сервис проверит доступ к сообществу перед сохранением.</p>
+            <a href="https://dev.vk.com/" target="_blank" rel="noreferrer">Официальная документация VK API →</a>
+          </>}
+          {platform==='max'&&<>
+            <p><strong>1. Создайте чат-бота.</strong> На платформе MAX для партнёров нужен верифицированный профиль организации, ИП или самозанятого. Откройте раздел <b>Чат-боты → Создать</b>.</p>
+            <p><strong>2. Получите токен.</strong> После создания и модерации откройте настройки бота и скопируйте токен.</p>
+            <p><strong>3. Добавьте бота.</strong> Добавьте его в нужный групповой чат или канал и убедитесь, что бот имеет права администратора.</p>
+            <p><strong>4. Укажите Chat ID.</strong> После добавления бота в чат/канал укажите его числовой <b>chat_id</b> здесь.</p>
+            <p><strong>5. Подключите.</strong> Вставьте токен и Chat ID и нажмите «Подключить аккаунт». Сервис проверит доступ автоматически.</p>
+            <a href="https://dev.max.ru/docs/chatbots/bots-create/create" target="_blank" rel="noreferrer">Официальная инструкция MAX →</a>
+          </>}
+          {platform==='ok'&&<>
+            <p><strong>1. Создайте приложение.</strong> Зарегистрируйте приложение в кабинете разработчика Одноклассников и настройте OAuth-доступ.</p>
+            <p><strong>2. Получите OAuth access token.</strong> Для публикации в группу приложению понадобятся права на контент группы и фотографии. Не передавайте access token и application secret посторонним.</p>
+            <p><strong>3. Подготовьте данные приложения.</strong> Возьмите <b>Application key</b> и <b>Application secret</b> из настроек приложения.</p>
+            <p><strong>4. Укажите ID группы.</strong> Введите числовой <b>ID группы</b>, от имени которой будут публиковаться записи.</p>
+            <p><strong>5. Подключите.</strong> Заполните четыре поля выше: access token, ID группы, Application key и Application secret. Сервис проверит доступ перед сохранением.</p>
+            <a href="https://apiok.ru/dev/methods/rest/mediatopic/mediatopic.post" target="_blank" rel="noreferrer">Официальная документация OK →</a>
+          </>}
+        </div>
+      </details></label>
       {msg&&<div className="auth-message">{msg}</div>}
       <button className="primary" disabled={busy||!token||!externalId} onClick={()=>void connect()}>{busy?'Проверяем и подключаем…':'Подключить аккаунт'}</button>
     </section></div>
