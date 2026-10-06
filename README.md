@@ -3,7 +3,7 @@
 Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram — следующим этапом.
 
 ## Production architecture
-- Web: Next.js on Vercel
+- Web: Next.js on Netlify during the current access test; Vercel remains the previous deployment target
 - Auth/DB/Storage/Functions: Supabase
 - Scheduler: pg_cron + pg_net + Supabase Edge Function
 - Secrets: Supabase Vault
@@ -31,4 +31,4 @@ AI пока не входит в MVP.
 - Protected scheduler
 
 ## Current status
-Инфраструктура и база подготовлены. Реальные API-интеграции соцсетей и полноценный фронтенд ещё в разработке.
+Предфинальное ядро собрано: календарь, редактор публикаций, медиа, рабочие пространства и приглашения, подключение и health-check аккаунтов, планирование/очередь, реальные адаптеры Telegram/VK/MAX/ОК, статистика и защищённое хранение токенов. OAuth-подключение соцсетей и часть расширенной аналитики остаются следующим этапом.
