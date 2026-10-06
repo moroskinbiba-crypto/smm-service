@@ -23,10 +23,10 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function json(body: Record<string, unknown>, status = 200) {
+function json(body: Record<string, unknown>, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", ...cors },
+    headers: { "content-type": "application/json", ...cors, ...extraHeaders },
   });
 }
 
@@ -727,7 +727,35 @@ Deno.serve(async (req: Request) => {
   try {
     const ctx = await authContext(req);
     const body = await req.json();
-    switch (body.action) {
+    const action = String(body.action || "");
+    const basicLimit = await ctx.admin.rpc("consume_api_rate_limit", {
+      p_key: "user:" + ctx.user.id,
+      p_limit: 120,
+      p_window_seconds: 60,
+    });
+    if (basicLimit.error) throw basicLimit.error;
+    const basic = Array.isArray(basicLimit.data) ? basicLimit.data[0] : basicLimit.data;
+    if (basic?.allowed !== true) {
+      const resetAt = basic?.reset_at ? new Date(basic.reset_at).toISOString() : new Date(Date.now() + 60000).toISOString();
+      const retryAfter = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+      return json({ ok: false, error: "Слишком много запросов. Попробуйте через несколько секунд.", retry_at: resetAt }, 429, { "Retry-After": String(retryAfter) });
+    }
+    const heavyActions = new Set(["stats","refresh-metrics","sync-inbox","content-insights","refresh-competitor","ai-generate","publish-now","import-posts"]);
+    if (heavyActions.has(action)) {
+      const heavyLimit = await ctx.admin.rpc("consume_api_rate_limit", {
+        p_key: "heavy:" + ctx.user.id,
+        p_limit: 30,
+        p_window_seconds: 60,
+      });
+      if (heavyLimit.error) throw heavyLimit.error;
+      const heavy = Array.isArray(heavyLimit.data) ? heavyLimit.data[0] : heavyLimit.data;
+      if (heavy?.allowed !== true) {
+        const resetAt = heavy?.reset_at ? new Date(heavy.reset_at).toISOString() : new Date(Date.now() + 60000).toISOString();
+        const retryAfter = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+        return json({ ok: false, error: "Слишком много тяжёлых операций. Попробуйте позже.", retry_at: resetAt }, 429, { "Retry-After": String(retryAfter) });
+      }
+    }
+    switch (action) {
       case "admin-check":
         return json({ ok: true, is_admin: await isPlatformAdmin(ctx.admin, ctx.user.id) });
       case "admin-overview": {
@@ -2030,48 +2058,50 @@ Deno.serve(async (req: Request) => {
         }
       case "refresh-metrics":
         {
-          const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
-            .select("id,platform,publication_type,social_account_id,external_post_id,social_accounts!inner(id,platform,external_id),posts!inner(workspace_id)")
-            .eq("posts.workspace_id", ctx.workspace.workspace_id)
-            .eq("status", "published")
-            .limit(500);
-          if (targetsError) throw targetsError;
-          let refreshed = 0;
-          const errors: string[] = [];
-          for (const target of targets ?? []) {
-            if (!target.external_post_id) continue;
-            try {
-              const account = target.social_accounts;
-              const secret = await getSecret(ctx.admin, account.id);
-              const metrics = await fetchMetrics(account.platform as Platform, secret ?? {}, account.external_id ?? "", target.external_post_id, target.publication_type || "feed");
-              if (Object.keys(metrics).length) {
-                const { error } = await ctx.admin.from("post_targets").update({
-                  metrics,
-                  updated_at: new Date().toISOString(),
-                }).eq("id", target.id);
-                if (error) throw error;
-                refreshed++;
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              errors.push(message);
-            }
-          }
-          return json({ ok: true, refreshed, errors: errors.slice(0, 20) });
+          const { data: queued, error: queueError } = await ctx.admin.rpc("enqueue_metrics_jobs", {
+            p_workspace_id: ctx.workspace.workspace_id,
+            p_limit: 1000,
+            p_force: true,
+          });
+          if (queueError) throw queueError;
+          await ctx.admin.from("stats_cache").delete().eq("workspace_id", ctx.workspace.workspace_id);
+          return json({ ok: true, queued: Number(queued ?? 0), message: "Обновление метрик поставлено в очередь" });
         }
       case "stats":
         {
           const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 30 * 86400000).toISOString();
           const to = body.to ? new Date(body.to).toISOString() : new Date().toISOString();
+          const rangeMs = Math.max(1, new Date(to).getTime() - new Date(from).getTime());
+          const previousFrom = new Date(new Date(from).getTime() - rangeMs);
+          const previousTo = new Date(from);
+          const cacheKey = "stats:" + from + ":" + to;
+          const { data: cachedRow, error: cacheError } = await ctx.admin.from("stats_cache")
+            .select("payload,expires_at")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .eq("cache_key", cacheKey)
+            .maybeSingle();
+          if (cacheError) throw cacheError;
+          if (cachedRow?.payload && new Date(cachedRow.expires_at).getTime() > Date.now()) {
+            return json({ ...(cachedRow.payload as Record<string, unknown>), cached: true });
+          }
+
           const { data: posts, error: postsError } = await ctx.admin.from("posts")
             .select("id,status,scheduled_at,created_at")
-            .eq("workspace_id", ctx.workspace.workspace_id);
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .or("created_at.gte." + previousFrom.toISOString() + ",scheduled_at.gte." + previousFrom.toISOString())
+            .or("created_at.lte." + to + ",scheduled_at.lte." + to)
+            .limit(5000);
           if (postsError) throw postsError;
 
-          const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
-            .select("id,platform,social_account_id,status,published_at,metrics,post_id,posts!inner(workspace_id),social_accounts(display_name,username)")
-            .eq("posts.workspace_id", ctx.workspace.workspace_id);
-          if (targetsError) throw targetsError;
+          const postIds = (posts ?? []).map((p:any)=>p.id);
+          let targets: any[] = [];
+          if (postIds.length) {
+            const { data: targetRows, error: targetsError } = await ctx.admin.from("post_targets")
+              .select("id,platform,social_account_id,status,published_at,metrics,post_id,social_accounts(display_name,username)")
+              .in("post_id", postIds);
+            if (targetsError) throw targetsError;
+            targets = targetRows ?? [];
+          }
 
           const scopedPosts = (posts ?? []).filter((p: any) => {
             const d = p.scheduled_at || p.created_at;
@@ -2157,9 +2187,7 @@ Deno.serve(async (req: Request) => {
 
           const engagement = totals.likes + totals.comments + totals.reposts;
           const ctr = totals.views > 0 ? Number(((totals.clicks / totals.views) * 100).toFixed(2)) : 0;
-          const activeDays = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
-          const previousFrom = new Date(new Date(from).getTime() - (new Date(to).getTime() - new Date(from).getTime()));
-          const previousTo = new Date(from);
+          const activeDays = Math.max(1, Math.ceil(rangeMs / 86400000));
 
           const previousPostIds = new Set(
             (posts ?? [])
@@ -2254,7 +2282,8 @@ Deno.serve(async (req: Request) => {
             engagement: Number(item.likes || 0) + Number(item.comments || 0) + Number(item.reposts || 0),
           }));
 
-          return json({
+          const payload = {
+            ok: true,
             ok: true,
             summary: {
               posts: scopedPosts.length,
@@ -2293,7 +2322,22 @@ Deno.serve(async (req: Request) => {
             top_posts: topPosts,
             best_hours: bestHours,
             by_account: byAccount,
-          });
+          };
+          await ctx.admin.from("stats_cache").upsert({
+            workspace_id: ctx.workspace.workspace_id,
+            cache_key: cacheKey,
+            payload,
+            expires_at: new Date(Date.now() + 30000).toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "workspace_id,cache_key" });
+          return json(payload);
+        }
+      case "scheduler-health":
+        {
+          await requirePlatformAdmin(ctx);
+          const { data, error } = await ctx.admin.rpc("scheduler_health");
+          if (error) throw error;
+          return json({ ok: true, ...(data ?? {}) });
         }
       default:
         return json({ ok: false, error: "Unknown action" }, 400);
