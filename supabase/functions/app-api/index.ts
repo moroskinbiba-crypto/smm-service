@@ -260,6 +260,21 @@ async function loadPosts(ctx: any, body: any) {
   return { posts, workspace: ctx.workspace };
 }
 
+async function runAutomations(ctx: any, triggerType: string, title: string, body: string, notificationType: string) {
+  const { data: rules, error } = await ctx.admin.from("automation_rules")
+    .select("id,trigger_type,action_type,enabled")
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .eq("enabled", true)
+    .eq("trigger_type", triggerType);
+  if (error) throw error;
+  if (!rules?.length) return;
+  const { data: members, error: membersError } = await ctx.admin.from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", ctx.workspace.workspace_id);
+  if (membersError) throw membersError;
+  await createWorkspaceNotifications(ctx,(members??[]).map((row:any)=>row.user_id),title,body,notificationType);
+}
+
 async function createWorkspaceNotifications(ctx: any, users: string[], title: string, body: string, type: string) {
   const uniqueUsers = [...new Set(users.filter(Boolean))];
   if (!uniqueUsers.length) return;
@@ -648,6 +663,11 @@ async function publishPost(ctx: any, postId: string) {
   const anySuccess = results.some(r => r.ok);
   const status = anyFailed && anySuccess ? "partially_published" : anyFailed ? "failed" : "published";
   await ctx.admin.from("posts").update({ status, updated_at: new Date().toISOString() }).eq("id", postId);
+  if (status === "published") {
+    await runAutomations(ctx,"publication_success","Публикация успешно вышла","Публикация была отправлена во все выбранные площадки.","publication_success");
+  } else if (status === "failed" || status === "partially_published") {
+    await runAutomations(ctx,"publication_failure","Ошибка публикации","Одна или несколько площадок не приняли публикацию.","publication_failure");
+  }
   return { status, results };
 }
 
@@ -1272,6 +1292,7 @@ Deno.serve(async (req: Request) => {
             "Пользователь отправил публикацию на проверку.",
             "approval_requested",
           );
+          await runAutomations(ctx,"approval_requested","Новая публикация на согласование","Пост отправлен на проверку.","approval_requested");
           return json({ ok: true, approval_status: "pending" });
         }
       case "review-approval":
@@ -1334,6 +1355,7 @@ Deno.serve(async (req: Request) => {
             }
           }
 
+          await runAutomations(ctx,"approval_reviewed",decision === "approved" ? "Публикация согласована" : "Публикация отклонена","Согласование завершено.","approval_reviewed");
           return json({ ok: true, approval_status: decision });
         }
       case "list-approval-queue":
