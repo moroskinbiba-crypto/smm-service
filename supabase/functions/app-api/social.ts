@@ -33,10 +33,30 @@ async function uploadMultipart(url: string, form: FormData) {
   return body;
 }
 
-export async function telegramHealth(secret: Secret, externalId?: string) {
+export async function telegramHealth(secret: Secret, externalId?: string, metadata: Record<string, unknown> = {}) {
   if (!secret.access_token) throw new Error("Telegram token не указан");
-  const me = await jsonResponse(`https://api.telegram.org/bot${secret.access_token}/getMe`);
-  if (externalId) await jsonResponse(`https://api.telegram.org/bot${secret.access_token}/getChat?chat_id=${encodeURIComponent(externalId)}`);
+  const base = `https://api.telegram.org/bot${secret.access_token}`;
+  const me = await jsonResponse(`${base}/getMe`);
+  const businessConnectionId = typeof metadata.business_connection_id === "string" ? metadata.business_connection_id : "";
+  if (businessConnectionId) {
+    const connection = await jsonResponse(`${base}/getBusinessConnection?business_connection_id=${encodeURIComponent(businessConnectionId)}`);
+    if (!connection.result?.is_enabled) throw new Error("Telegram Business-подключение отключено");
+    if (connection.result?.rights?.can_manage_stories !== true) {
+      throw new Error("У Telegram Business-бота нет права «Управление историями»");
+    }
+    return {
+      display_name: connection.result?.user?.first_name || connection.result?.user?.username || "Telegram Business",
+      username: connection.result?.user?.username ? `@${connection.result.user.username}` : null,
+      metadata_patch: { business_connection_id: connection.result.id, business_user_id: String(connection.result.user?.id ?? ""), business_user_chat_id: String(connection.result?.user_chat_id ?? "") },
+    };
+  }
+  if (externalId) {
+    const chat = await jsonResponse(`${base}/getChat?chat_id=${encodeURIComponent(externalId)}`);
+    return {
+      display_name: chat.result?.title || me.result?.first_name || me.result?.username || "Telegram Bot",
+      username: chat.result?.username ? `@${chat.result.username}` : (me.result?.username ? `@${me.result.username}` : null),
+    };
+  }
   return { display_name: me.result?.first_name || me.result?.username || "Telegram Bot", username: me.result?.username ? `@${me.result.username}` : null };
 }
 
@@ -45,10 +65,14 @@ export async function telegramPublish(secret: Secret, chatId: string, body: stri
   if (!chatId) throw new Error("Не указан chat_id Telegram");
   const base = `https://api.telegram.org/bot${secret.access_token}`;
 
+  const businessConnectionId = typeof metadata.business_connection_id === "string" ? metadata.business_connection_id : "";
+  if (businessConnectionId && publicationType !== "story") {
+    throw new Error("Этот Telegram-аккаунт подключён как Business. Для него сейчас доступен только режим «Сторис».");
+  }
+
   if (publicationType === "story") {
-    const businessConnectionId = typeof metadata.business_connection_id === "string" ? metadata.business_connection_id : "";
     if (!businessConnectionId) {
-      throw new Error("Для Telegram Stories нужен Business connection ID подключённого Telegram Business аккаунта");
+      throw new Error("Для Telegram Stories подключите Telegram Business и разрешите боту управление историями.");
     }
     if (media.length !== 1) throw new Error("Telegram Story требует ровно один фото- или видеофайл");
     const item = media[0];
@@ -280,7 +304,18 @@ async function instagramCreateAndPublish(secret: Secret, igUserId: string, body:
 
 export async function instagramPublish(secret: Secret, igUserId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!media.length) throw new Error("Instagram требует минимум одно изображение или видео");
-  if (publicationType === "story" && media.length !== 1) throw new Error("Instagram Story требует один файл");
+  if (publicationType === "story") {
+    if (String(metadata.account_type || "").toUpperCase() !== "BUSINESS") {
+      throw new Error("Instagram Stories доступны только для профессионального Business-аккаунта");
+    }
+    if (media.length !== 1) throw new Error("Instagram Story требует один файл");
+  }
+  if (publicationType === "reel" && !media[0]?.type?.startsWith("video/")) {
+    throw new Error("Reels требует видеофайл");
+  }
+  if (media[0]?.type?.startsWith("video/") && publicationType === "feed") {
+    throw new Error("Для видео в Instagram выберите Reels или Сторис");
+  }
   if (media.length > 1) throw new Error("Instagram-карусель пока будет следующим этапом; публикуйте один файл");
   return instagramCreateAndPublish(secret, igUserId, body, media[0], publicationType);
 }
@@ -392,10 +427,11 @@ export async function fetchMetrics(platform: Platform, secret: Secret, externalI
 
 export async function healthcheck(platform: Platform, secret: Secret, externalId: string, metadata: Record<string, unknown>) {
   switch (platform) {
-    case "telegram": return telegramHealth(secret, externalId);
+    case "telegram": return telegramHealth(secret, externalId, metadata);
     case "vk": return vkHealth(secret, externalId);
     case "max": return maxHealth(secret, externalId);
     case "ok": return okHealth(secret, metadata);
+    case "instagram": return instagramHealth(secret, externalId);
   }
 }
 
