@@ -1,6 +1,21 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { fetchMetrics, healthcheck, publish, type Platform, type MediaItem } from "./social.ts";
+import {
+  fetchMetrics,
+  healthcheck,
+  publish,
+  telegramSyncInbox,
+  telegramSendInboxReply,
+  vkSyncInbox,
+  vkSendInboxReply,
+  maxSyncInbox,
+  maxSendInboxReply,
+  okSyncInbox,
+  okSendInboxReply,
+  type Platform,
+  type MediaItem,
+  type InboxItem,
+} from "./social.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -243,6 +258,221 @@ async function loadPosts(ctx: any, body: any) {
   );
 
   return { posts, workspace: ctx.workspace };
+}
+
+async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
+  let inserted = 0;
+
+  for (const item of items) {
+    const { data: thread, error: threadError } = await ctx.admin.from("inbox_threads")
+      .upsert({
+        workspace_id: ctx.workspace.workspace_id,
+        social_account_id: account.id,
+        platform: account.platform,
+        external_thread_id: item.external_thread_id,
+        thread_type: item.thread_type,
+        subject: item.subject ?? null,
+        participant_name: item.participant_name ?? item.author_name ?? null,
+        participant_external_id: item.participant_external_id ?? item.author_external_id ?? null,
+        post_target_id: item.post_target_external_id ? null : null,
+        last_message_at: item.sent_at,
+        last_message_preview: item.body.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "social_account_id,external_thread_id,thread_type" })
+      .select("id,unread_count")
+      .single();
+
+    if (threadError || !thread) {
+      if (threadError) throw threadError;
+      continue;
+    }
+
+    const { data: messageRows, error: messageError } = await ctx.admin.from("inbox_messages")
+      .upsert({
+        thread_id: thread.id,
+        workspace_id: ctx.workspace.workspace_id,
+        social_account_id: account.id,
+        external_message_id: item.external_message_id,
+        direction: "inbound",
+        message_type: item.message_type,
+        author_name: item.author_name,
+        author_external_id: item.author_external_id,
+        body: item.body,
+        parent_external_id: item.parent_external_id ?? null,
+        sent_at: item.sent_at,
+        metadata: item.metadata ?? {},
+      }, { onConflict: "social_account_id,external_message_id", ignoreDuplicates: true })
+      .select("id");
+
+    if (messageError) throw messageError;
+    const wasInserted = Array.isArray(messageRows) && messageRows.length > 0;
+    if (wasInserted) {
+      inserted++;
+      await ctx.admin.from("inbox_threads").update({
+        unread_count: Number(thread.unread_count ?? 0) + 1,
+        last_message_at: item.sent_at,
+        last_message_preview: item.body.slice(0, 500),
+        participant_name: item.participant_name ?? item.author_name ?? null,
+        participant_external_id: item.participant_external_id ?? item.author_external_id ?? null,
+        updated_at: new Date().toISOString(),
+      }).eq("id", thread.id);
+    }
+  }
+
+  return inserted;
+}
+
+async function syncAccountInbox(ctx: any, account: any) {
+  const secret = await getSecret(ctx.admin, account.id);
+  const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
+  let result: { items: InboxItem[]; metadata_patch?: Record<string, unknown> } = { items: [] };
+
+  const targetsResult = await ctx.admin.from("post_targets")
+    .select("external_post_id,published_at")
+    .eq("social_account_id", account.id)
+    .eq("status", "published")
+    .not("external_post_id", "is", null)
+    .order("published_at", { ascending: false })
+    .limit(30);
+  if (targetsResult.error) throw targetsResult.error;
+  const targets = targetsResult.data ?? [];
+
+  switch (account.platform as Platform) {
+    case "telegram":
+      result = await telegramSyncInbox(secret ?? {}, metadata);
+      break;
+    case "vk":
+      result = await vkSyncInbox(secret ?? {}, account.external_id ?? "", targets);
+      break;
+    case "max":
+      result = await maxSyncInbox(secret ?? {}, account.external_id ?? "", targets);
+      break;
+    case "ok":
+      result = await okSyncInbox(secret ?? {}, metadata);
+      break;
+  }
+
+  const inserted = await upsertInboxItems(ctx, account, result.items ?? []);
+
+  if (result.metadata_patch && Object.keys(result.metadata_patch).length) {
+    const nextMetadata = { ...metadata, ...result.metadata_patch };
+    const { error } = await ctx.admin.from("social_accounts").update({
+      metadata: nextMetadata,
+      updated_at: new Date().toISOString(),
+    }).eq("id", account.id).eq("workspace_id", ctx.workspace.workspace_id);
+    if (error) throw error;
+  }
+
+  return { inserted, scanned: result.items?.length ?? 0 };
+}
+
+async function listInboxThreads(ctx: any) {
+  const { data, error } = await ctx.admin.from("inbox_threads")
+    .select("id,platform,external_thread_id,thread_type,subject,participant_name,participant_external_id,avatar_url,post_target_id,unread_count,last_message_at,last_message_preview,status,created_at,updated_at,social_accounts(display_name,username,external_id)")
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .order("updated_at", { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function listInboxMessages(ctx: any, threadId: string) {
+  const { data: thread, error: threadError } = await ctx.admin.from("inbox_threads")
+    .select("id,workspace_id,social_account_id,platform,external_thread_id,thread_type,subject,participant_name,participant_external_id,unread_count")
+    .eq("id", threadId)
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .maybeSingle();
+  if (threadError) throw threadError;
+  if (!thread) throw new Error("Диалог не найден");
+
+  const { data: messages, error } = await ctx.admin.from("inbox_messages")
+    .select("id,external_message_id,direction,message_type,author_name,author_external_id,body,parent_external_id,sent_at,read_at,metadata")
+    .eq("thread_id", threadId)
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .order("sent_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(500);
+  if (error) throw error;
+
+  return { thread, messages: messages ?? [] };
+}
+
+async function sendInboxMessage(ctx: any, threadId: string, body: string) {
+  const text = body.trim();
+  if (!text) throw new Error("Введите текст ответа");
+  if (text.length > 4000) throw new Error("Сообщение слишком длинное");
+
+  const { data: thread, error: threadError } = await ctx.admin.from("inbox_threads")
+    .select("id,social_account_id,platform,external_thread_id,thread_type,post_target_id")
+    .eq("id", threadId)
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .maybeSingle();
+  if (threadError) throw threadError;
+  if (!thread) throw new Error("Диалог не найден");
+
+  const account = await accountRow(ctx.admin, thread.social_account_id, ctx.workspace.workspace_id);
+  const secret = await getSecret(ctx.admin, account.id);
+  let sent: any;
+
+  if (account.platform === "telegram") {
+    sent = await telegramSendInboxReply(secret ?? {}, thread.external_thread_id, text);
+  } else if (account.platform === "vk") {
+    const parts = thread.external_thread_id.split(":");
+    if (parts.length < 3) throw new Error("Не удалось определить VK-пост");
+    sent = await vkSendInboxReply(secret ?? {}, parts[1], parts[2], null, text);
+  } else if (account.platform === "max") {
+    const isComment = thread.thread_type === "comment";
+    const postId = thread.external_thread_id.startsWith("max-comment:") ? thread.external_thread_id.replace("max-comment:", "") : null;
+    sent = await maxSendInboxReply(secret ?? {}, thread.external_thread_id.replace("max-comment:", ""), text, isComment, postId);
+  } else if (account.platform === "ok") {
+    sent = await okSendInboxReply(secret ?? {}, thread.external_thread_id, text);
+  } else {
+    throw new Error("Ответы для этой площадки пока не поддерживаются");
+  }
+
+  const { data: insertedMessage, error: insertError } = await ctx.admin.from("inbox_messages")
+    .insert({
+      thread_id: thread.id,
+      workspace_id: ctx.workspace.workspace_id,
+      social_account_id: account.id,
+      external_message_id: sent.external_message_id,
+      direction: "outbound",
+      message_type: thread.thread_type,
+      author_name: account.display_name || account.username || account.platform,
+      author_external_id: account.external_id,
+      body: text,
+      parent_external_id: null,
+      sent_at: sent.sent_at,
+      metadata: sent,
+    })
+    .select("id,external_message_id,direction,message_type,author_name,author_external_id,body,parent_external_id,sent_at,read_at,metadata")
+    .single();
+
+  if (insertError) throw insertError;
+
+  await ctx.admin.from("inbox_threads").update({
+    last_message_at: sent.sent_at,
+    last_message_preview: text.slice(0, 500),
+    updated_at: new Date().toISOString(),
+  }).eq("id", thread.id);
+
+  return insertedMessage;
+}
+
+async function markInboxRead(ctx: any, threadId: string) {
+  const { error: messageError } = await ctx.admin.from("inbox_messages")
+    .update({ read_at: new Date().toISOString() })
+    .eq("thread_id", threadId)
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .eq("direction", "inbound")
+    .is("read_at", null);
+  if (messageError) throw messageError;
+
+  const { error: threadError } = await ctx.admin.from("inbox_threads")
+    .update({ unread_count: 0, updated_at: new Date().toISOString() })
+    .eq("id", threadId)
+    .eq("workspace_id", ctx.workspace.workspace_id);
+  if (threadError) throw threadError;
 }
 
 async function publishPost(ctx: any, postId: string) {
@@ -553,6 +783,51 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "sync-inbox":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const { data: accounts, error } = await ctx.admin.from("social_accounts")
+            .select("id,platform,external_id,display_name,username,status,metadata")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .eq("status", "connected");
+          if (error) throw error;
+
+          let scanned = 0;
+          let inserted = 0;
+          const errors: string[] = [];
+          for (const account of accounts ?? []) {
+            try {
+              const result = await syncAccountInbox(ctx, account);
+              scanned += result.scanned;
+              inserted += result.inserted;
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              errors.push((account.display_name || account.platform) + ": " + message);
+            }
+          }
+          return json({ ok: true, scanned, inserted, errors: errors.slice(0, 20) });
+        }
+      case "list-inbox":
+        {
+          const threads = await listInboxThreads(ctx);
+          return json({ ok: true, threads });
+        }
+      case "get-inbox-thread":
+        {
+          const result = await listInboxMessages(ctx, String(body.thread_id || ""));
+          return json({ ok: true, ...result });
+        }
+      case "send-inbox-message":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const message = await sendInboxMessage(ctx, String(body.thread_id || ""), String(body.text || ""));
+          return json({ ok: true, message });
+        }
+      case "mark-inbox-read":
+        {
+          await markInboxRead(ctx, String(body.thread_id || ""));
+          return json({ ok: true });
+        }
       case "refresh-metrics":
         {
           const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
