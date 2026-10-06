@@ -5,8 +5,6 @@ alter table public.post_targets
 alter table public.social_account_secrets
   add column if not exists client_secret_ciphertext bytea;
 
-create unique index if not exists post_targets_post_account_unique
-  on public.post_targets(post_id, social_account_id);
 
 create index if not exists posts_workspace_schedule_idx
   on public.posts(workspace_id, scheduled_at, status);
