@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { healthcheck, publish, type Platform, type MediaItem } from "../_shared/social.ts";
+import { healthcheck, publish, type Platform, type MediaItem } from "./social.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
