@@ -59,14 +59,19 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, workspaces: data ?? [] });
       }
       case "bootstrap": {
-        const { data, error } = await admin.rpc("ensure_workspace_for_user", {
+        const { data: ensured, error: ensureError } = await admin.rpc("ensure_workspace_for_user", {
           p_user_id: user.id,
           p_name: typeof body.name === "string" ? body.name : null,
           p_display_name: typeof body.display_name === "string" ? body.display_name : null,
           p_timezone: typeof body.timezone === "string" ? body.timezone : "Europe/Moscow",
         });
-        if (error) throw error;
-        return json({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
+        if (ensureError) throw ensureError;
+        const { data: selectedRows, error: selectedError } = await admin.rpc("get_workspace_for_user", {
+          p_user_id: user.id,
+          p_workspace_id: selectedWorkspaceId,
+        });
+        if (selectedError) throw selectedError;
+        return json({ ok: true, workspace: (Array.isArray(selectedRows) && selectedRows[0]) || (Array.isArray(ensured) ? ensured[0] : ensured) });
       }
       case "get-workspace": {
         const { data, error } = await admin.rpc("get_workspace_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
