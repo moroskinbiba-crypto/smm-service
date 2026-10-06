@@ -929,7 +929,22 @@ Deno.serve(async (req: Request) => {
       case "telegram-notifications-start": {
         const token = Deno.env.get("TGRML_NOTIFY_BOT_TOKEN") ?? "";
         const username = Deno.env.get("TGRML_NOTIFY_BOT_USERNAME") ?? "";
-        if (!token || !username) throw new Error("Telegram-бот уведомлений ещё не настроен");
+        const webhookSecret = Deno.env.get("TGRML_NOTIFY_WEBHOOK_SECRET") ?? "";
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+        if (!token || !username || !webhookSecret) throw new Error("Telegram-бот уведомлений ещё не настроен");
+        const webhookUrl = (supabaseUrl.endsWith("/") ? supabaseUrl.slice(0,-1) : supabaseUrl) + "/functions/v1/telegram-notify-webhook";
+        const webhook = await fetch("https://api.telegram.org/bot" + token + "/setWebhook", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            url: webhookUrl,
+            secret_token: webhookSecret,
+            allowed_updates: ["message"],
+            drop_pending_updates: false,
+          }),
+        });
+        const webhookBody = await webhook.json().catch(()=>({}));
+        if (!webhook.ok || webhookBody?.ok !== true) throw new Error("Не удалось настроить webhook бота уведомлений: " + (webhookBody?.description || "неизвестная ошибка"));
         const code = randomToken(10);
         const { error } = await ctx.admin.from("telegram_notification_requests").insert({
           user_id: ctx.user.id,
