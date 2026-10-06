@@ -932,6 +932,35 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           return json({ ok: true, accounts: data ?? [] });
         }
+      case "max-service-status":
+        {
+          const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+          const username = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
+          return json({ ok: true, configured: Boolean(token && username), bot_username: username || null });
+        }
+      case "max-service-start":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+          const username = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
+          if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
+          const bytes = crypto.getRandomValues(new Uint8Array(12));
+          const code = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("").slice(0, 16);
+          const { error } = await ctx.admin.from("max_connection_requests").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            user_id: ctx.user.id,
+            code,
+            expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          });
+          if (error) throw error;
+          return json({
+            ok: true,
+            code,
+            expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            bot_username: username,
+            instructions: "Добавьте бота в канал как администратора, затем отправьте в канале сообщение /connect " + code,
+          });
+        }
       case "max-connect-info":
         {
           const botToken = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
