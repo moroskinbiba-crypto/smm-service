@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/app-shell';
 import { workspaceRequest } from '../../lib/workspace-api';
+import { createClient } from '../../lib/supabase/client';
 
-type Member = { user_id: string; display_name: string | null; role: string; created_at: string };
+type Member = { user_id: string; display_name: string | null; role: string; created_at: string; invited_by: string | null; suspended_at: string | null; suspended_reason: string | null };
 type Invite = { invite_id: string; expires_at: string; used_at: string | null; created_at: string; role: string };
 type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
 
@@ -20,6 +21,8 @@ export default function TeamPage() {
   const [createdLink, setCreatedLink] = useState('');
   const [message, setMessage] = useState('');
   const [inviteRole, setInviteRole] = useState('editor');
+  const [currentUserId, setCurrentUserId] = useState('');
+  const supabase = createClient();
 
   async function load() {
     try {
@@ -39,7 +42,7 @@ export default function TeamPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); void supabase.auth.getUser().then(({data})=>setCurrentUserId(data.user?.id??'')); }, [supabase]);
 
   const canInvite = workspace?.role === 'owner' || workspace?.role === 'admin';
 
@@ -85,6 +88,15 @@ export default function TeamPage() {
     }
   }
 
+  async function suspendMember(member: Member){
+    const next=!member.suspended_at;
+    if(!window.confirm((next?'Отключить':'Включить')+' аккаунт '+(member.display_name||'пользователя')+'?'))return;
+    setBusy(true);setMessage('');
+    try{await workspaceRequest('suspend-member',{user_id:member.user_id,suspended:next});await load();}
+    catch(e){setMessage(e instanceof Error?e.message:'Не удалось изменить доступ')}
+    finally{setBusy(false)}
+  }
+
   const activeInvites = useMemo(() => invites.filter(item => !item.used_at && new Date(item.expires_at) > new Date()), [invites]);
 
   return (
@@ -108,6 +120,7 @@ export default function TeamPage() {
     <option value="approver">Согласующий</option>
     <option value="viewer">Наблюдатель</option>
   </select>}
+  {canInvite && member.role !== 'owner' && member.invited_by === currentUserId && <button className={member.suspended_at?'secondary':'secondary danger-button'} disabled={busy} onClick={()=>void suspendMember(member)}>{member.suspended_at?'Включить':'Отключить'}</button>}
 </div>)}
               {!members.length && <div className="empty small-empty">Участников пока нет.</div>}
             </div>
