@@ -114,15 +114,24 @@ export default function TeamPage() {
           </section>
           <section className="card">
             <div className="card-head"><h2>Приглашение</h2><span>7 дней</span></div>
-            <p className="section-copy">Создайте одноразовую ссылку для сотрудника. Роль приглашённого — «Сотрудник».</p>
+            <p className="section-copy">Создайте одноразовую ссылку и сразу назначьте роль участника.</p>
             {canInvite ? <>
+              <label className="invite-role-label">Роль приглашённого
+                <select className="invite-role-select" value={inviteRole} onChange={event => setInviteRole(event.target.value)}>
+                  <option value="editor">Редактор</option>
+                  <option value="publisher">Публикатор</option>
+                  <option value="approver">Согласующий</option>
+                  <option value="viewer">Наблюдатель</option>
+                  {workspace?.role === 'owner' && <option value="admin">Администратор</option>}
+                </select>
+              </label>
               <button className="primary" disabled={busy} onClick={createInvite}>{busy ? 'Создаём…' : '＋ Создать инвайт-ссылку'}</button>
               {createdLink && <div className="invite-result"><div className="invite-label">Ссылка готова</div><div className="invite-row"><input readOnly value={createdLink} /><button className="secondary" onClick={copyLink}>Копировать</button></div><small>После первого использования ссылка перестанет работать.</small></div>}
               {message && <div className="auth-message">{message}</div>}
             </> : <div className="auth-message">Создавать приглашения может только руководитель.</div>}
           </section>
         </div>
-        {canInvite && <section className="card"><div className="card-head"><h2>Активные приглашения</h2><span>{activeInvites.length}</span></div><div className="invite-list">{activeInvites.map(invite => <div className="invite-item" key={invite.invite_id}><div><strong>Сотрудник</strong><span>до {new Date(invite.expires_at).toLocaleString('ru-RU')}</span></div><button className="secondary danger-button" onClick={() => revokeInvite(invite.invite_id)}>Отозвать</button></div>)}{!activeInvites.length && <div className="empty small-empty">Активных приглашений нет.</div>}</div></section>}
+        {canInvite && <section className="card"><div className="card-head"><h2>Активные приглашения</h2><span>{activeInvites.length}</span></div><div className="invite-list">{activeInvites.map(invite => <div className="invite-item" key={invite.invite_id}><div><strong>{roleLabel(invite.role)}</strong><span>до {new Date(invite.expires_at).toLocaleString('ru-RU')}</span></div><button className="secondary danger-button" onClick={() => revokeInvite(invite.invite_id)}>Отозвать</button></div>)}{!activeInvites.length && <div className="empty small-empty">Активных приглашений нет.</div>}</div></section>}
       </section>
     </AppShell>
   );
