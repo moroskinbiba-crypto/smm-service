@@ -1149,7 +1149,7 @@ Deno.serve(async (req: Request) => {
           if (postsError) throw postsError;
 
           const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
-            .select("id,platform,status,published_at,metrics,post_id,posts!inner(workspace_id)")
+            .select("id,platform,social_account_id,status,published_at,metrics,post_id,posts!inner(workspace_id),social_accounts(display_name,username)")
             .eq("posts.workspace_id", ctx.workspace.workspace_id);
           if (targetsError) throw targetsError;
 
@@ -1272,6 +1272,37 @@ Deno.serve(async (req: Request) => {
               return { ...item, preview: body.length > 140 ? body.slice(0, 140) + "…" : body || "Без текста" };
             });
 
+          const accountMap: Record<string, any> = {};
+          for (const target of scopedTargets) {
+            const accountId = String(target.social_account_id || "");
+            if (!accountId) continue;
+            accountMap[accountId] ||= {
+              account_id: accountId,
+              platform: target.platform,
+              name: target.social_accounts?.display_name || target.social_accounts?.username || target.platform,
+              published: 0,
+              failed: 0,
+              views: 0,
+              likes: 0,
+              comments: 0,
+              reposts: 0,
+            };
+            const account = accountMap[accountId];
+            if (target.status === "published") account.published++;
+            if (target.status === "failed") account.failed++;
+            account.views += Number(target.metrics?.views ?? 0);
+            account.likes += Number(target.metrics?.likes ?? 0);
+            account.comments += Number(target.metrics?.comments ?? 0);
+            account.reposts += Number(target.metrics?.reposts ?? 0);
+          }
+          const byAccount = Object.values(accountMap).map((item: any) => ({
+            ...item,
+            engagement: item.likes + item.comments + item.reposts,
+            engagement_rate: item.views > 0 ? Number((((item.likes + item.comments + item.reposts) / item.views) * 100).toFixed(2)) : 0,
+            avg_views: item.published > 0 ? Math.round(item.views / item.published) : 0,
+            success_rate: item.published + item.failed > 0 ? Number(((item.published / (item.published + item.failed)) * 100).toFixed(1)) : 0,
+          })).sort((a: any, b: any) => b.avg_views - a.avg_views).map((item: any, index: number) => ({ ...item, rank: index + 1 }));
+
           const hourMap: Record<number, { hour: number; published: number; views: number; engagement: number }> = {};
           for (const target of scopedTargets) {
             if (target.status !== "published" || !target.published_at) continue;
@@ -1322,6 +1353,7 @@ Deno.serve(async (req: Request) => {
             daily: Object.values(daily).sort((a: any, b: any) => a.date.localeCompare(b.date)),
             top_posts: topPosts,
             best_hours: bestHours,
+            by_account: byAccount,
           });
         }
       default:
