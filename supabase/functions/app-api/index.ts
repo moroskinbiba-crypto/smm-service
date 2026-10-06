@@ -2234,6 +2234,11 @@ Deno.serve(async (req: Request) => {
             return br - ar;
           }).slice(0, 5);
 
+          const formatRows = Object.values(byFormat).map((item: any) => ({
+            ...item,
+            engagement: Number(item.likes || 0) + Number(item.comments || 0) + Number(item.reposts || 0),
+          }));
+
           return json({
             ok: true,
             summary: {
@@ -2255,6 +2260,8 @@ Deno.serve(async (req: Request) => {
                 ? Number(((totals.publishedTargets / (totals.publishedTargets + totals.failedTargets)) * 100).toFixed(1))
                 : 0,
               publications_per_day: Number((scopedPosts.length / activeDays).toFixed(2)),
+              reels: formatRows.filter((x:any) => x.format === "reel").reduce((n:number,x:any)=>n+Number(x.published||0),0),
+              clips: formatRows.filter((x:any) => x.format === "clip").reduce((n:number,x:any)=>n+Number(x.published||0),0),
               comparison: {
                 posts: pctChange(scopedPosts.length, previousPostIds.size),
                 published: pctChange(scopedTargets.filter((t: any) => t.status === "published").length, previousPublished),
@@ -2266,6 +2273,7 @@ Deno.serve(async (req: Request) => {
               },
             },
             by_platform: Object.values(byPlatform),
+            by_format: formatRows,
             daily: Object.values(daily).sort((a: any, b: any) => a.date.localeCompare(b.date)),
             top_posts: topPosts,
             best_hours: bestHours,
