@@ -2083,16 +2083,15 @@ Deno.serve(async (req: Request) => {
             byPlatform[t.platform] ||= { platform: t.platform, ...emptyMetrics() };
             const platform = byPlatform[t.platform];
 
+            const format = String(t.publication_type || "feed");
+            const formatKey = t.platform + ":" + format;
+            byFormat[formatKey] ||= { platform: t.platform, format, published: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
+            const f = byFormat[formatKey];
             if (t.status === "published") {
               platform.published++;
               f.published++;
             }
             if (t.status === "failed") platform.failed++;
-
-            const format = String(t.publication_type || "feed");
-            const formatKey = t.platform + ":" + format;
-            byFormat[formatKey] ||= { platform: t.platform, format, published: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
-            const f = byFormat[formatKey];
             const m = t.metrics ?? {};
             platform.views += Number(m.views ?? 0);
             platform.likes += Number(m.likes ?? 0);
