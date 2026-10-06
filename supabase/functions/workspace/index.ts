@@ -195,13 +195,12 @@ Deno.serve(async (req: Request) => {
         if (!["editor","publisher","approver","viewer","admin"].includes(role)) {
           throw new Error("Недопустимая роль приглашения");
         }
-        const { data: currentMember, error: memberError } = await admin.from("workspace_members")
-          .select("workspace_id,role")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+        const { data: currentRows, error: memberError } = await admin.rpc("get_workspace_for_user", {
+          p_user_id: user.id,
+          p_workspace_id: selectedWorkspaceId,
+        });
         if (memberError) throw memberError;
+        const currentMember = Array.isArray(currentRows) ? currentRows[0] : currentRows;
         if (!currentMember || !["owner","admin"].includes(currentMember.role)) {
           throw new Error("Создавать приглашения может только руководитель");
         }
