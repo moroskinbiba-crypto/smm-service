@@ -30,7 +30,7 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-const platforms = new Set(["telegram", "vk", "max", "ok"]);
+const platforms = new Set(["telegram", "vk", "max", "ok", "instagram"]);
 
 async function userContext(req: Request) {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
@@ -149,12 +149,14 @@ async function requireTargets(admin: any, workspaceId: string, ids: string[]) {
 
 function validateMedia(media: unknown) {
   const items = Array.isArray(media) ? media : [];
-  if (items.length > 10) throw new Error("В одной публикации можно добавить не более 10 фото");
+  if (items.length > 10) throw new Error("В одной публикации можно добавить не более 10 медиафайлов");
   for (const item of items) {
     const type = typeof item?.type === "string" ? item.type : "";
     const size = typeof item?.size === "number" ? item.size : 0;
-    if (!/^image\/(jpeg|png|webp)$/.test(type)) throw new Error("Поддерживаются только JPG, PNG и WebP");
-    if (size > 50 * 1024 * 1024) throw new Error("Размер файла не должен превышать 50 МБ");
+    if (!/^(image\/(jpeg|png|webp)|video\/(mp4|quicktime|webm|x-matroska))$/.test(type)) {
+      throw new Error("Поддерживаются JPG, PNG, WebP и видео MP4/MOV/WEBM/MKV");
+    }
+    if (size > 250 * 1024 * 1024) throw new Error("Размер файла не должен превышать 250 МБ");
     if (typeof item?.path !== "string" || !item.path) throw new Error("У медиафайла отсутствует путь");
   }
   return items;
@@ -201,10 +203,12 @@ async function savePost(ctx: any, body: any) {
     postId = data.id;
   }
 
+  const publicationTypes = typeof body.target_publication_types === "object" && body.target_publication_types ? body.target_publication_types : {};
   const rows = targetAccounts.map((account: any) => ({
     post_id: postId,
     social_account_id: account.id,
     platform: account.platform,
+    publication_type: typeof publicationTypes[account.id] === "string" ? publicationTypes[account.id] : "feed",
     status: desiredStatus === "scheduled" ? "pending" : "waiting",
   }));
   const { error: targetError } = await ctx.admin.from("post_targets").insert(rows);
@@ -217,7 +221,7 @@ async function loadPosts(ctx: any, body: any) {
   const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 45 * 86400000).toISOString();
   const to = body.to ? new Date(body.to).toISOString() : new Date(Date.now() + 90 * 86400000).toISOString();
 
-  const select = "id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,approval_status,approval_requested_by,approval_approved_by,approval_comment,approval_updated_at,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))";
+  const select = "id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,approval_status,approval_requested_by,approval_approved_by,approval_comment,approval_updated_at,post_targets(id,social_account_id,platform,publication_type,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))";
 
   const [scheduledResult, unscheduledResult] = await Promise.all([
     ctx.admin.from("posts")
@@ -1260,6 +1264,7 @@ Deno.serve(async (req: Request) => {
               post_id: post.id,
               social_account_id: account.id,
               platform: account.platform,
+              publication_type: "feed",
               status: scheduledAt ? "pending" : "waiting",
             }));
             const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
@@ -1569,7 +1574,7 @@ Deno.serve(async (req: Request) => {
       case "refresh-metrics":
         {
           const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
-            .select("id,platform,social_account_id,external_post_id,social_accounts!inner(id,platform,external_id),posts!inner(workspace_id)")
+            .select("id,platform,publication_type,social_account_id,external_post_id,social_accounts!inner(id,platform,external_id),posts!inner(workspace_id)")
             .eq("posts.workspace_id", ctx.workspace.workspace_id)
             .eq("status", "published")
             .limit(500);
