@@ -68,6 +68,7 @@ function percent(value: number) {
 type Comparison = { posts:number; published:number; views:number; likes:number; comments:number; reposts:number; clicks:number };
 type TopPost = { post_id:string; preview:string; views:number; likes:number; comments:number; reposts:number; clicks:number; score:number };
 type BestHour = { hour:number; published:number; views:number; engagement:number };
+type BenchmarkAccount = { account_id:string; platform:string; name:string; published:number; failed:number; views:number; likes:number; comments:number; reposts:number; engagement:number; engagement_rate:number; avg_views:number; success_rate:number; rank:number };
 
 export default function StatsPage() {
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
@@ -77,13 +78,14 @@ export default function StatsPage() {
   const [comparison, setComparison] = useState<Comparison|null>(null);
   const [topPosts, setTopPosts] = useState<TopPost[]>([]);
   const [bestHours, setBestHours] = useState<BestHour[]>([]);
+  const [benchmarkAccounts, setBenchmarkAccounts] = useState<BenchmarkAccount[]>([]);
   const [msg, setMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
     const end = new Date();
     const start = new Date(Date.now() - Number(period) * 86400000);
-    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[] }>(
+    const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[]; by_account: BenchmarkAccount[] }>(
       'stats',
       { from: start.toISOString(), to: end.toISOString() },
     );
@@ -93,6 +95,7 @@ export default function StatsPage() {
     setComparison(r.comparison ?? null);
     setTopPosts(r.top_posts ?? []);
     setBestHours(r.best_hours ?? []);
+    setBenchmarkAccounts(r.by_account ?? []);
   }
 
   useEffect(() => {
@@ -250,6 +253,15 @@ export default function StatsPage() {
               <div><span>Всего действий</span><strong>{number(summary?.engagement ?? 0)}</strong></div>
             </div>
           </section>
+        </section>
+
+        <section className="card stats-benchmark">
+          <div className="card-head"><h2>Benchmark внутри команды</h2><span>сравнение подключённых аккаунтов</span></div>
+          <div className="stats-table stats-table-wide">
+            <div className="stats-row stats-head"><span>Аккаунт</span><span>Площадка</span><span>Посты</span><span>Средние просмотры</span><span>ER</span><span>Успешность</span><span>Место</span></div>
+            {benchmarkAccounts.map(account=><div className="stats-row" key={account.account_id}><span><strong>{account.name}</strong></span><span>{platformNames[account.platform] ?? account.platform}</span><span>{number(account.published)}</span><span>{number(account.avg_views)}</span><span>{percent(account.engagement_rate)}</span><span>{percent(account.success_rate)}</span><span>#{account.rank}</span></div>)}
+            {!benchmarkAccounts.length&&<div className="empty small-empty">Нужно несколько подключённых аккаунтов и публикаций для benchmark.</div>}
+          </div>
         </section>
 
         <section className="card stats-top-posts">
