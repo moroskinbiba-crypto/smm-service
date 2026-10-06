@@ -785,6 +785,130 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "bulk-delete-posts":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const ids = Array.isArray(body.post_ids) ? [...new Set(body.post_ids.map(String).filter(Boolean))].slice(0, 100) : [];
+          if (!ids.length) throw new Error("Не выбраны публикации");
+          const { data: posts, error } = await ctx.admin.from("posts")
+            .select("id,status,media")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .in("id", ids);
+          if (error) throw error;
+          for (const post of posts ?? []) {
+            if (post.status === "publishing") continue;
+            await deleteStoredMedia(ctx.admin, post.media);
+            await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
+          }
+          return json({ ok: true, deleted: (posts ?? []).filter((post: any) => post.status !== "publishing").length });
+        }
+      case "bulk-reschedule-posts":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const ids = Array.isArray(body.post_ids) ? [...new Set(body.post_ids.map(String).filter(Boolean))].slice(0, 100) : [];
+          const minutes = Number(body.delta_minutes);
+          if (!ids.length) throw new Error("Не выбраны публикации");
+          if (!Number.isFinite(minutes) || Math.abs(minutes) > 525600) throw new Error("Некорректное смещение времени");
+          const { data: posts, error } = await ctx.admin.from("posts")
+            .select("id,scheduled_at,status")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .in("id", ids);
+          if (error) throw error;
+          let updated = 0;
+          for (const post of posts ?? []) {
+            if (!post.scheduled_at || post.status === "publishing" || post.status === "published") continue;
+            const next = new Date(new Date(post.scheduled_at).getTime() + minutes * 60000);
+            if (next.getTime() <= Date.now()) throw new Error("Смещение создало время в прошлом");
+            const { error: updateError } = await ctx.admin.from("posts").update({ scheduled_at: next.toISOString(), updated_at: new Date().toISOString() }).eq("id", post.id);
+            if (updateError) throw updateError;
+            updated++;
+          }
+          return json({ ok: true, updated });
+        }
+      case "bulk-clone-posts":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const ids = Array.isArray(body.post_ids) ? [...new Set(body.post_ids.map(String).filter(Boolean))].slice(0, 50) : [];
+          if (!ids.length) throw new Error("Не выбраны публикации");
+          const { data: posts, error } = await ctx.admin.from("posts")
+            .select("id,body,media,post_targets(social_account_id,platform)")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .in("id", ids);
+          if (error) throw error;
+          const created: string[] = [];
+          for (const post of posts ?? []) {
+            const { data: copy, error: copyError } = await ctx.admin.from("posts").insert({
+              workspace_id: ctx.workspace.workspace_id,
+              user_id: ctx.user.id,
+              body: post.body,
+              media: post.media,
+              status: "draft",
+              scheduled_at: null,
+              approval_status: "not_required",
+            }).select("id").single();
+            if (copyError) throw copyError;
+            const targetRows = (post.post_targets ?? []).map((target: any) => ({
+              post_id: copy.id,
+              social_account_id: target.social_account_id,
+              platform: target.platform,
+              status: "waiting",
+            }));
+            if (targetRows.length) {
+              const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
+              if (targetError) throw targetError;
+            }
+            created.push(copy.id);
+          }
+          return json({ ok: true, created });
+        }
+      case "create-recurrence":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const sourcePostId = String(body.post_id || "");
+          const intervalDays = Number(body.interval_days);
+          const nextRunAt = body.next_run_at ? new Date(body.next_run_at).toISOString() : "";
+          const maxRuns = body.max_runs == null || body.max_runs === "" ? null : Number(body.max_runs);
+          if (!sourcePostId || !Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365) throw new Error("Некорректный интервал повтора");
+          if (!nextRunAt || new Date(nextRunAt).getTime() <= Date.now()) throw new Error("Следующий запуск должен быть в будущем");
+          if (maxRuns !== null && (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 1000)) throw new Error("Некорректное количество повторов");
+          const { data: source, error: sourceError } = await ctx.admin.from("posts")
+            .select("id,status")
+            .eq("id", sourcePostId)
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (sourceError) throw sourceError;
+          if (!source) throw new Error("Публикация не найдена");
+          const { data, error } = await ctx.admin.from("post_recurrences").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            source_post_id: sourcePostId,
+            interval_days: intervalDays,
+            next_run_at: nextRunAt,
+            max_runs: maxRuns,
+            created_by: ctx.user.id,
+            active: true,
+          }).select("id").single();
+          if (error) throw error;
+          return json({ ok: true, recurrence_id: data.id });
+        }
+      case "list-recurrences":
+        {
+          const { data, error } = await ctx.admin.from("post_recurrences")
+            .select("id,source_post_id,interval_days,next_run_at,end_at,max_runs,run_count,active,created_at,posts!inner(id,body,status,media)")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .order("next_run_at", { ascending: true });
+          if (error) throw error;
+          return json({ ok: true, recurrences: data ?? [] });
+        }
+      case "cancel-recurrence":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const { error } = await ctx.admin.from("post_recurrences")
+            .update({ active: false, updated_at: new Date().toISOString() })
+            .eq("id", String(body.recurrence_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
       case "request-approval":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
