@@ -1014,6 +1014,38 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           return json({ ok: true });
         }
+      case "list-media":
+        {
+          const { data: files, error } = await ctx.admin.storage.from("media").list(ctx.workspace.workspace_id, {
+            limit: 300,
+            sortBy: { column: "created_at", order: "desc" },
+          });
+          if (error) throw error;
+          const media = await Promise.all((files ?? []).map(async (file: any) => {
+            if (!file?.name || file.name === ".emptyFolderPlaceholder") return null;
+            const path = ctx.workspace.workspace_id + "/" + file.name;
+            const { data } = await ctx.admin.storage.from("media").createSignedUrl(path, 3600);
+            return {
+              name: file.name,
+              path,
+              signed_url: data?.signedUrl ?? null,
+              created_at: file.created_at ?? null,
+              updated_at: file.updated_at ?? null,
+              metadata: file.metadata ?? null,
+            };
+          }));
+          return json({ ok: true, media: media.filter(Boolean) });
+        }
+      case "delete-media":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const rawPath = String(body.path || "");
+          const prefix = ctx.workspace.workspace_id + "/";
+          if (!rawPath.startsWith(prefix)) throw new Error("Недопустимый путь к медиа");
+          const { error } = await ctx.admin.storage.from("media").remove([rawPath]);
+          if (error) throw error;
+          return json({ ok: true });
+        }
       case "list-notifications":
         {
           const { data, error } = await ctx.admin.from("notifications")
