@@ -70,7 +70,6 @@ Deno.serve(async (req: Request) => {
       .eq("status", "published")
       .in("social_account_id", (accounts ?? []).map((a:any)=>a.id));
 
-    const accountMap = new Map((accounts ?? []).map((a:any)=>[a.id,a]));
     const totals: Record<string,{views:number;likes:number;comments:number;reposts:number;published:number}> = {};
     const daily: Record<string,{views:number;likes:number;comments:number;reposts:number;published:number}> = {};
 
