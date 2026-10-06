@@ -33,6 +33,15 @@ Deno.serve(async (req: Request) => {
   const { data: { user }, error: userError } = await admin.auth.getUser(jwt);
   if (userError || !user) return json({ ok: false, error: "Unauthorized" }, 401);
 
+  const { data: profile, error: profileError } = await admin.from("profiles")
+    .select("suspended_at,suspended_reason")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profileError) return json({ ok: false, error: profileError.message }, 500);
+  if (profile?.suspended_at) {
+    return json({ ok: false, error: profile.suspended_reason || "Аккаунт приостановлен администратором" }, 403);
+  }
+
   let body: { action?: string; [key: string]: unknown };
   try {
     body = await req.json();
