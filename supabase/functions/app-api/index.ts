@@ -1167,6 +1167,7 @@ Deno.serve(async (req: Request) => {
             likes: 0,
             comments: 0,
             reposts: 0,
+            clicks: 0,
           });
 
           const byPlatform: Record<string, any> = {};
@@ -1184,15 +1185,17 @@ Deno.serve(async (req: Request) => {
             platform.likes += Number(m.likes ?? 0);
             platform.comments += Number(m.comments ?? 0);
             platform.reposts += Number(m.reposts ?? 0);
+            platform.clicks += Number(m.clicks ?? 0);
 
             if (t.status === "published" && t.published_at) {
               const day = String(t.published_at).slice(0, 10);
-              daily[day] ||= { date: day, published: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
+              daily[day] ||= { date: day, published: 0, views: 0, likes: 0, comments: 0, reposts: 0, clicks: 0 };
               daily[day].published++;
               daily[day].views += Number(m.views ?? 0);
               daily[day].likes += Number(m.likes ?? 0);
               daily[day].comments += Number(m.comments ?? 0);
               daily[day].reposts += Number(m.reposts ?? 0);
+              daily[day].clicks += Number(m.clicks ?? 0);
             }
           }
 
@@ -1215,13 +1218,74 @@ Deno.serve(async (req: Request) => {
             acc.likes += item.likes;
             acc.comments += item.comments;
             acc.reposts += item.reposts;
+            acc.clicks += item.clicks;
             acc.publishedTargets += item.published;
             acc.failedTargets += item.failed;
             return acc;
-          }, { views: 0, likes: 0, comments: 0, reposts: 0, publishedTargets: 0, failedTargets: 0 });
+          }, { views: 0, likes: 0, comments: 0, reposts: 0, clicks: 0, publishedTargets: 0, failedTargets: 0 });
 
           const engagement = totals.likes + totals.comments + totals.reposts;
+          const ctr = totals.views > 0 ? Number(((totals.clicks / totals.views) * 100).toFixed(2)) : 0;
           const activeDays = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
+          const previousFrom = new Date(new Date(from).getTime() - (new Date(to).getTime() - new Date(from).getTime()));
+          const previousTo = new Date(from);
+
+          const previousPostIds = new Set(
+            (posts ?? [])
+              .filter((p: any) => {
+                const d = new Date(p.scheduled_at || p.created_at).getTime();
+                return d >= previousFrom.getTime() && d < previousTo.getTime();
+              })
+              .map((p: any) => p.id)
+          );
+          const previousTargets = (targets ?? []).filter((t: any) => previousPostIds.has(t.post_id));
+          const previousPublished = previousTargets.filter((t: any) => t.status === "published").length;
+          const previousFailed = previousTargets.filter((t: any) => t.status === "failed").length;
+          const previousViews = previousTargets.reduce((sum: number, t: any) => sum + Number(t.metrics?.views ?? 0), 0);
+          const previousLikes = previousTargets.reduce((sum: number, t: any) => sum + Number(t.metrics?.likes ?? 0), 0);
+          const previousComments = previousTargets.reduce((sum: number, t: any) => sum + Number(t.metrics?.comments ?? 0), 0);
+          const previousReposts = previousTargets.reduce((sum: number, t: any) => sum + Number(t.metrics?.reposts ?? 0), 0);
+          const previousClicks = previousTargets.reduce((sum: number, t: any) => sum + Number(t.metrics?.clicks ?? 0), 0);
+          const pctChange = (current: number, previous: number) => previous === 0 ? (current > 0 ? 100 : 0) : Number((((current - previous) / previous) * 100).toFixed(1));
+
+          const topPostMap: Record<string, any> = {};
+          for (const target of scopedTargets) {
+            if (target.status !== "published") continue;
+            const metric = target.metrics ?? {};
+            const score = Number(metric.views ?? 0) + Number(metric.likes ?? 0) + Number(metric.comments ?? 0) * 3 + Number(metric.reposts ?? 0) * 4;
+            topPostMap[target.post_id] ||= { post_id: target.post_id, views: 0, likes: 0, comments: 0, reposts: 0, clicks: 0, score: 0 };
+            const item = topPostMap[target.post_id];
+            item.views += Number(metric.views ?? 0);
+            item.likes += Number(metric.likes ?? 0);
+            item.comments += Number(metric.comments ?? 0);
+            item.reposts += Number(metric.reposts ?? 0);
+            item.clicks += Number(metric.clicks ?? 0);
+            item.score += score;
+          }
+          const postMap = new Map((posts ?? []).map((p: any) => [p.id, p]));
+          const topPosts = Object.values(topPostMap)
+            .sort((a: any, b: any) => b.score - a.score)
+            .slice(0, 10)
+            .map((item: any) => {
+              const post = postMap.get(item.post_id) as any;
+              const body = String(post?.body ?? "").replace(/\s+/g, " ").trim();
+              return { ...item, preview: body.length > 140 ? body.slice(0, 140) + "…" : body || "Без текста" };
+            });
+
+          const hourMap: Record<number, { hour: number; published: number; views: number; engagement: number }> = {};
+          for (const target of scopedTargets) {
+            if (target.status !== "published" || !target.published_at) continue;
+            const hour = new Date(target.published_at).getUTCHours();
+            hourMap[hour] ||= { hour, published: 0, views: 0, engagement: 0 };
+            hourMap[hour].published++;
+            hourMap[hour].views += Number(target.metrics?.views ?? 0);
+            hourMap[hour].engagement += Number(target.metrics?.likes ?? 0) + Number(target.metrics?.comments ?? 0) + Number(target.metrics?.reposts ?? 0);
+          }
+          const bestHours = Object.values(hourMap).sort((a: any, b: any) => {
+            const ar = a.published ? a.views / a.published : 0;
+            const br = b.published ? b.views / b.published : 0;
+            return br - ar;
+          }).slice(0, 5);
 
           return json({
             ok: true,
@@ -1234,6 +1298,8 @@ Deno.serve(async (req: Request) => {
               likes: totals.likes,
               comments: totals.comments,
               reposts: totals.reposts,
+              clicks: totals.clicks,
+              ctr,
               engagement,
               engagement_rate: totals.views > 0 ? Number(((engagement / totals.views) * 100).toFixed(2)) : 0,
               avg_views_per_post: totals.publishedTargets > 0 ? Math.round(totals.views / totals.publishedTargets) : 0,
@@ -1242,9 +1308,20 @@ Deno.serve(async (req: Request) => {
                 ? Number(((totals.publishedTargets / (totals.publishedTargets + totals.failedTargets)) * 100).toFixed(1))
                 : 0,
               publications_per_day: Number((scopedPosts.length / activeDays).toFixed(2)),
+              comparison: {
+                posts: pctChange(scopedPosts.length, previousPostIds.size),
+                published: pctChange(scopedTargets.filter((t: any) => t.status === "published").length, previousPublished),
+                views: pctChange(totals.views, previousViews),
+                likes: pctChange(totals.likes, previousLikes),
+                comments: pctChange(totals.comments, previousComments),
+                reposts: pctChange(totals.reposts, previousReposts),
+                clicks: pctChange(totals.clicks, previousClicks),
+              },
             },
             by_platform: Object.values(byPlatform),
             daily: Object.values(daily).sort((a: any, b: any) => a.date.localeCompare(b.date)),
+            top_posts: topPosts,
+            best_hours: bestHours,
           });
         }
       default:
