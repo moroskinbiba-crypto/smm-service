@@ -243,6 +243,15 @@ Deno.serve(async (req: Request) => {
     if (post?.status) await runScheduledAutomations(supabase, postId, post.status);
   }
 
+  try {
+    await fetch((url.endsWith("/") ? url.slice(0, -1) : url) + "/functions/v1/telegram-notifier", {
+      method: "POST",
+      headers: { "x-cron-token": expectedToken },
+    });
+  } catch {
+    // Notification worker failure must not break scheduled publication.
+  }
+
   return new Response(JSON.stringify({
     ok: true,
     enabled: true,
