@@ -948,7 +948,7 @@ Deno.serve(async (req: Request) => {
           const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
           if (supabaseUrl) {
             const subscriptionBody: Record<string, unknown> = {
-              url: supabaseUrl.replace(/\\/$/, "") + "/functions/v1/max-webhook",
+              url: (supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl) + "/functions/v1/max-webhook",
               update_types: ["bot_added", "bot_removed", "chat_title_changed", "bot_admin_permissions_changed", "message_created"],
             };
             if (webhookSecret) subscriptionBody.secret = webhookSecret;
