@@ -1,51 +1,57 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from './components/app-shell';
-import { workspaceRequest } from '../lib/workspace-api';
+import { appRequest, type ApiPost, type SocialAccount, uploadMedia } from '../lib/app-api';
 
-const networks = [
-  { id: 'telegram', name: 'Telegram', icon: '✈️' },
-  { id: 'vk', name: 'VK', icon: 'VK' },
-  { id: 'max', name: 'MAX', icon: 'M' },
-  { id: 'ok', name: 'Одноклассники', icon: 'OK' },
-  { id: 'instagram', name: 'Instagram', icon: '◎', muted: true },
-];
+const meta: Record<string, {name:string; icon:string}> = {
+  telegram:{name:'Telegram',icon:'✈️'}, vk:{name:'VK',icon:'VK'},
+  max:{name:'MAX',icon:'M'}, ok:{name:'Одноклассники',icon:'OK'}
+};
+const emojis = ['😀','😂','😍','🔥','👍','❤️','🎉','✨','📌','📣','🚀','💡','👏','😊','🥳','🤝','✅','❗'];
+const pad=(n:number)=>String(n).padStart(2,'0');
+const label=(s:string)=>({draft:'Черновик',scheduled:'Запланировано',publishing:'Публикуется',published:'Опубликовано',partially_published:'Частично',failed:'Ошибка',canceled:'Отменено'} as Record<string,string>)[s] ?? s;
+function range(d:Date){return {from:new Date(d.getFullYear(),d.getMonth()-1,1).toISOString(),to:new Date(d.getFullYear(),d.getMonth()+2,0,23,59,59).toISOString()};}
+function preview(p:ApiPost){const x=p.body.replace(/\s+/g,' ').trim();return x.length>20?x.slice(0,20)+'…':x||'Без текста';}
 
-export default function Home() {
-  const [selected, setSelected] = useState<string[]>(['telegram', 'vk']);
-  const [workspaceName, setWorkspaceName] = useState('Рабочее пространство');
+function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:string;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const {post,accounts,workspaceId,onClose,onSaved}=props;
+  const base=post?.scheduled_at?new Date(post.scheduled_at):new Date(Date.now()+3600000);
+  const [text,setText]=useState(post?.body??'');
+  const [selected,setSelected]=useState<string[]>(post?.post_targets.map(t=>t.social_account_id)??accounts.filter(a=>a.status==='connected').map(a=>a.id));
+  const [date,setDate]=useState(String(base.getFullYear())+'-'+pad(base.getMonth()+1)+'-'+pad(base.getDate()));
+  const [time,setTime]=useState(pad(base.getHours())+':'+pad(base.getMinutes()));
+  const [media,setMedia]=useState(post?.media??[]);
+  const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(''); const [showEmoji,setShowEmoji]=useState(false);
+  async function files(fs:FileList|File[]){setBusy(true);setMsg('');try{const next=[];for(const f of Array.from(fs))next.push(await uploadMedia(workspaceId,f));setMedia(v=>[...v,...next]);}catch(e){setMsg(e instanceof Error?e.message:'Не удалось загрузить файл')}finally{setBusy(false)}}
+  function wrap(a:string,b=a){const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;setText(text.slice(0,s)+a+text.slice(s,e)+b+text.slice(e));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(s+a.length,e+a.length)})}
+  async function save(kind:'draft'|'schedule'|'publish'){if(!selected.length){setMsg('Выберите хотя бы один аккаунт.');return}if(!text.trim()&&!media.length){setMsg('Добавьте текст или медиафайл.');return}setBusy(true);setMsg('');try{const x=await appRequest<{post_id:string}>('save-post',{post_id:post?.id,text,media,scheduled_at:kind==='draft'?null:new Date(date+'T'+time).toISOString(),target_account_ids:selected});if(kind==='publish')await appRequest('publish-now',{post_id:x.post_id});await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось сохранить')}finally{setBusy(false)}}
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="post-editor-modal" onMouseDown={e=>e.stopPropagation()}>
+    <div className="modal-head"><div><div className="eyebrow">РЕДАКТОР ПУБЛИКАЦИИ</div><h2>{post?'Изменить публикацию':'Новая публикация'}</h2></div><button className="icon-button" onClick={onClose}>×</button></div>
+    <div className="editor-grid"><section>
+      <div className="editor-toolbar"><button onClick={()=>wrap('**')}>B</button><button onClick={()=>wrap('*')}>I</button><button onClick={()=>wrap(String.fromCharCode(96))}>&lt;&gt;</button><button onClick={()=>{const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s!==e)setText(text.slice(0,s)+'['+text.slice(s,e)+'](https://example.com)'+text.slice(e))}}>🔗</button><button onClick={()=>setShowEmoji(v=>!v)}>😊</button></div>
+      {showEmoji&&<div className="emoji-popover">{emojis.map(x=><button key={x} onClick={()=>{setText(v=>v+x);setShowEmoji(false)}}>{x}</button>)}</div>}
+      <textarea id="post-text" className="post-editor-textarea" value={text} onChange={e=>setText(e.target.value)} placeholder="Текст публикации…" />
+      <div className="upload-area" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void files(e.dataTransfer.files)}}><input id="post-file" hidden type="file" accept="image/*,video/*" multiple onChange={e=>{if(e.target.files)void files(e.target.files)}}/><label htmlFor="post-file"><strong>Добавить фото или видео</strong><span>или перетащите сюда файлы</span></label></div>
+      {!!media.length&&<div className="media-list">{media.map((m,i)=><div className="media-item" key={m.path} draggable onDragStart={e=>e.dataTransfer.setData('text/plain',String(i))} onDragOver={e=>e.preventDefault()} onDrop={e=>{const from=Number(e.dataTransfer.getData('text/plain'));if(Number.isNaN(from)||from===i)return;const n=[...media];const [x]=n.splice(from,1);n.splice(i,0,x);setMedia(n.map((q,j)=>({...q,order:j})))}}><div className="media-thumb">{m.signed_url?<img src={m.signed_url} alt=""/>:m.type?.startsWith('video')?'🎬':'🖼️'}</div><div className="media-info"><strong>{m.name}</strong><span>Перетащите для изменения порядка</span></div><button className="secondary" onClick={()=>setMedia(v=>v.filter((_,j)=>j!==i))}>Удалить</button></div>)}</div>}
+    </section>
+    <aside className="editor-aside"><div className="editor-block"><h3>Площадки</h3><div className="account-select-list">{accounts.map(a=><button key={a.id} onClick={()=>a.status==='connected'&&setSelected(v=>v.includes(a.id)?v.filter(x=>x!==a.id):[...v,a.id])} className={selected.includes(a.id)?'account-select selected':'account-select'} disabled={a.status!=='connected'}><span className="network-icon">{meta[a.platform]?.icon??'◎'}</span><span><strong>{a.display_name||a.username||a.external_id}</strong><small>{meta[a.platform]?.name??a.platform}</small></span><span className={a.status==='connected'?'account-state ok':'account-state'}>{a.status==='connected'?'✓':'!'}</span></button>)}</div>{!accounts.length&&<div className="empty small-empty">Подключите аккаунт.</div>}</div>
+      <div className="editor-block"><h3>Планирование</h3><div className="schedule-form"><label>Дата<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><label>Время<input type="time" value={time} onChange={e=>setTime(e.target.value)}/></label></div></div>
+      {msg&&<div className="auth-message">{msg}</div>}</aside></div>
+    <div className="modal-actions"><button className="secondary" disabled={busy} onClick={()=>void save('draft')}>Сохранить черновик</button><div className="modal-actions-right"><button className="secondary" disabled={busy} onClick={()=>void save('schedule')}>{busy?'Сохраняем…':'Запланировать'}</button><button className="primary modal-primary" disabled={busy} onClick={()=>void save('publish')}>{busy?'Отправляем…':'Опубликовать сейчас'}</button></div></div>
+  </div></div>
+}
 
-  useEffect(() => {
-    void workspaceRequest<{ workspace?: { workspace_name?: string } }>('get-workspace').then(result => {
-      if (result.workspace?.workspace_name) setWorkspaceName(result.workspace.workspace_name);
-    }).catch(() => undefined);
-  }, []);
-
-  const toggle = (id: string) => setSelected(current => current.includes(id) ? current.filter(x => x !== id) : [...current, id]);
-
-  return (
-    <AppShell active="plan">
-      <section className="page-section">
-        <div className="page-heading">
-          <div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Здесь будет календарь запланированных и уже опубликованных материалов.</p></div>
-          <button className="plus-button" type="button">＋</button>
-        </div>
-        <section className="card calendar-preview">
-          <div className="calendar-toolbar"><div><strong>Октябрь 2026</strong><span>Сегодня</span></div><div className="calendar-mode"><button className="secondary">Месяц</button><button className="secondary">Неделя</button></div></div>
-          <div className="calendar-grid">
-            {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
-            {Array.from({ length: 35 }, (_, index) => <div className="calendar-cell" key={index}>{index < 31 && <span>{index + 1}</span>}{index === 5 && <div className="calendar-post mock-post">Новая публикация</div>}{index === 12 && <div className="calendar-post mock-post">Анонс мероприятия</div>}</div>)}
-          </div>
-        </section>
-        <section className="card quick-composer">
-          <div className="card-head"><h2>Быстрый просмотр редактора</h2><span>Скоро подключим сохранение</span></div>
-          <textarea placeholder="Введите текст публикации…" />
-          <div className="media">＋ Добавить фото или видео</div>
-          <div className="targets"><h3>Площадки</h3>{networks.map(network => <button key={network.id} onClick={() => !network.muted && toggle(network.id)} className={selected.includes(network.id) ? 'network active' : 'network'} disabled={network.muted}><b>{network.icon}</b>{network.name}{network.muted && <small>позже</small>}</button>)}</div>
-          <div className="schedule"><div><label>Дата</label><input type="date" /></div><div><label>Время</label><input type="time" /></div></div>
-        </section>
-      </section>
-    </AppShell>
-  );
+export default function Home(){
+  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
+  async function load(){const w=await appRequest<{workspace:{workspace_id:string;workspace_name:string}}>('bootstrap');const a=await appRequest<{accounts:SocialAccount[]}>('list-accounts');const p=await appRequest<{posts:ApiPost[]}>('list-posts',range(cursor));setWorkspaceId(w.workspace.workspace_id);setWorkspaceName(w.workspace.workspace_name);setAccounts(a.accounts??[]);setPosts(p.posts??[])}
+  useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
+  const days=useMemo(()=>{const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))},[cursor]);
+  const byDay=useMemo(()=>{const m=new Map<string,ApiPost[]>();for(const p of posts){const d=p.scheduled_at||(p.status==='published'?p.created_at:null);if(!d)continue;const k=new Date(d).toISOString().slice(0,10);m.set(k,[...(m.get(k)??[]),p])}return m},[posts]);
+  async function remove(id:string){try{await appRequest('delete-post',{post_id:id});await load()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось удалить')}}
+  return <AppShell active="plan"><section className="page-section"><div className="page-heading"><div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Календарь, редактор, медиа и планирование публикаций.</p></div><button className="plus-button" onClick={()=>setEditor(null)}>＋</button></div>
+    <section className="card calendar-preview"><div className="calendar-toolbar"><div className="calendar-nav"><button className="secondary" onClick={()=>setCursor(new Date(cursor.getFullYear(),cursor.getMonth()-1,1))}>←</button><strong>{cursor.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</strong><button className="secondary" onClick={()=>setCursor(new Date(cursor.getFullYear(),cursor.getMonth()+1,1))}>→</button><button className="secondary" onClick={()=>setCursor(new Date())}>Сегодня</button></div><span>{posts.length} публикаций</span></div>
+      <div className="calendar-grid">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><div className="calendar-weekday" key={d}>{d}</div>)}{days.map(d=>{const k=d.toISOString().slice(0,10);const ev=byDay.get(k)??[];return <div key={k} className={d.getMonth()===cursor.getMonth()?'calendar-cell':'calendar-cell muted-day'}><span>{d.getDate()}</span>{ev.slice(0,3).map(p=><button key={p.id} className={'calendar-post status-'+p.status} onClick={()=>setEditor(p)}>{p.media[0]?.signed_url&&<img src={p.media[0].signed_url} alt=""/>}<strong>{preview(p)}</strong><small>{label(p.status)}</small></button>)}{ev.length>3&&<small className="more-posts">+ ещё {ev.length-3}</small>}</div>})}</div>
+    </section>
+    <section className="card plan-list-card"><div className="card-head"><h2>Ближайшие публикации</h2><span>{posts.length}</span></div><div className="plan-list">{posts.slice(0,15).map(p=><div className="plan-row" key={p.id}><div className="plan-date">{p.scheduled_at?new Date(p.scheduled_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Без даты'}</div><div className="plan-content"><strong>{preview(p)}</strong><span>{p.post_targets.map(t=>meta[t.platform]?.name??t.platform).join(' · ')}</span></div><span className={'status-badge status-'+p.status}>{label(p.status)}</span><button className="secondary" onClick={()=>setEditor(p)}>Открыть</button><button className="secondary danger-button" onClick={()=>void remove(p.id)}>Удалить</button></div>)}{!posts.length&&<div className="empty small-empty">Пока нет публикаций. Нажмите «+».</div>}</div></section>{msg&&<div className="auth-message">{msg}</div>}</section>{editor!==undefined&&<Editor post={editor} accounts={accounts} workspaceId={workspaceId} onClose={()=>setEditor(undefined)} onSaved={load}/>}</AppShell>
 }
