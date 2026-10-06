@@ -260,6 +260,20 @@ async function loadPosts(ctx: any, body: any) {
   return { posts, workspace: ctx.workspace };
 }
 
+async function createWorkspaceNotifications(ctx: any, users: string[], title: string, body: string, type: string) {
+  const uniqueUsers = [...new Set(users.filter(Boolean))];
+  if (!uniqueUsers.length) return;
+  const rows = uniqueUsers.map(userId => ({
+    workspace_id: ctx.workspace.workspace_id,
+    user_id: userId,
+    type,
+    title,
+    body,
+  }));
+  const { error } = await ctx.admin.from("notifications").insert(rows);
+  if (error) throw error;
+}
+
 async function fetchCompetitorSnapshot(ctx: any, competitor: any) {
   const { data: accounts, error: accountsError } = await ctx.admin.from("social_accounts")
     .select("id,platform,external_id,metadata")
@@ -899,6 +913,26 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "list-notifications":
+        {
+          const { data, error } = await ctx.admin.from("notifications")
+            .select("id,type,title,body,read_at,created_at")
+            .eq("user_id", ctx.user.id)
+            .order("created_at", { ascending: false })
+            .limit(100);
+          if (error) throw error;
+          return json({ ok: true, notifications: data ?? [] });
+        }
+      case "mark-notification-read":
+        {
+          const id = String(body.notification_id || "");
+          const { error } = await ctx.admin.from("notifications")
+            .update({ read_at: new Date().toISOString() })
+            .eq("id", id)
+            .eq("user_id", ctx.user.id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
       case "content-insights":
         {
           const { data: posts, error: postsError } = await ctx.admin.from("posts")
@@ -1177,6 +1211,18 @@ Deno.serve(async (req: Request) => {
             status: "pending",
           });
           if (approvalError) throw approvalError;
+          const { data: approvers, error: approverError } = await ctx.admin.from("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .in("role", ["owner", "admin", "approver"]);
+          if (approverError) throw approverError;
+          await createWorkspaceNotifications(
+            ctx,
+            (approvers ?? []).map((row:any)=>row.user_id),
+            "Новая публикация на согласование",
+            "Пользователь отправил публикацию на проверку.",
+            "approval_requested",
+          );
           return json({ ok: true, approval_status: "pending" });
         }
       case "review-approval":
@@ -1217,6 +1263,10 @@ Deno.serve(async (req: Request) => {
           if (updatePostError) throw updatePostError;
 
           if (approval) {
+            const { data: requestRow } = await ctx.admin.from("post_approvals")
+              .select("requested_by")
+              .eq("id", approval.id)
+              .maybeSingle();
             const { error: updateApprovalError } = await ctx.admin.from("post_approvals").update({
               status: decision,
               reviewed_by: ctx.user.id,
@@ -1224,6 +1274,15 @@ Deno.serve(async (req: Request) => {
               reviewed_at: new Date().toISOString(),
             }).eq("id", approval.id);
             if (updateApprovalError) throw updateApprovalError;
+            if (requestRow?.requested_by) {
+              await createWorkspaceNotifications(
+                ctx,
+                [requestRow.requested_by],
+                decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
+                comment || "Статус публикации изменён.",
+                "approval_reviewed",
+              );
+            }
           }
 
           return json({ ok: true, approval_status: decision });
