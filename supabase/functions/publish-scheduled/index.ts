@@ -23,6 +23,75 @@ async function getSecret(admin: any, accountId: string) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+async function processRecurrences(admin: any) {
+  const now = new Date();
+  const { data: recurrences, error } = await admin.from("post_recurrences")
+    .select("id,workspace_id,source_post_id,interval_days,next_run_at,end_at,max_runs,run_count")
+    .eq("active", true)
+    .lte("next_run_at", now.toISOString())
+    .order("next_run_at", { ascending: true })
+    .limit(20);
+  if (error) throw error;
+
+  let created = 0;
+  for (const recurrence of recurrences ?? []) {
+    if (recurrence.max_runs !== null && Number(recurrence.run_count) >= Number(recurrence.max_runs)) {
+      await admin.from("post_recurrences").update({ active: false, updated_at: new Date().toISOString() }).eq("id", recurrence.id);
+      continue;
+    }
+
+    const { data: source, error: sourceError } = await admin.from("posts")
+      .select("id,body,media,post_targets(social_account_id,platform)")
+      .eq("id", recurrence.source_post_id)
+      .eq("workspace_id", recurrence.workspace_id)
+      .maybeSingle();
+    if (sourceError) throw sourceError;
+    if (!source) {
+      await admin.from("post_recurrences").update({ active: false, updated_at: new Date().toISOString() }).eq("id", recurrence.id);
+      continue;
+    }
+
+    const scheduledAt = new Date(recurrence.next_run_at).toISOString();
+    const { data: cloned, error: cloneError } = await admin.from("posts").insert({
+      workspace_id: recurrence.workspace_id,
+      user_id: null,
+      body: source.body ?? "",
+      media: source.media ?? [],
+      status: "scheduled",
+      scheduled_at: scheduledAt,
+      approval_status: "not_required",
+    }).select("id").single();
+    if (cloneError) throw cloneError;
+
+    const targets = (source.post_targets ?? []).map((target: any) => ({
+      post_id: cloned.id,
+      social_account_id: target.social_account_id,
+      platform: target.platform,
+      status: "pending",
+    }));
+    if (targets.length) {
+      const { error: targetError } = await admin.from("post_targets").insert(targets);
+      if (targetError) throw targetError;
+    }
+
+    const nextRun = new Date(new Date(recurrence.next_run_at).getTime() + Number(recurrence.interval_days) * 86400000);
+    const nextCount = Number(recurrence.run_count) + 1;
+    const shouldStop =
+      (recurrence.max_runs !== null && nextCount >= Number(recurrence.max_runs)) ||
+      (recurrence.end_at && nextRun.getTime() > new Date(recurrence.end_at).getTime());
+
+    await admin.from("post_recurrences").update({
+      run_count: nextCount,
+      next_run_at: nextRun.toISOString(),
+      active: !shouldStop,
+      updated_at: new Date().toISOString(),
+    }).eq("id", recurrence.id);
+
+    created++;
+  }
+  return created;
+}
+
 async function refreshPostStatus(admin: any, postId: string) {
   const { data: targets } = await admin.from("post_targets").select("status").eq("post_id", postId);
   const statuses = (targets ?? []).map((x: any) => x.status);
@@ -58,6 +127,7 @@ Deno.serve(async (req: Request) => {
   if (!expectedToken || providedToken !== expectedToken) return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), { status: 401, headers: { "content-type": "application/json" } });
   if (!enabled) return new Response(JSON.stringify({ ok: true, enabled: false, claimed: 0 }), { headers: { "content-type": "application/json" } });
 
+  await processRecurrences(supabase);
   const { data: claimed, error: claimError } = await supabase.rpc("claim_scheduled_targets", { p_limit: 20 });
   if (claimError) return new Response(JSON.stringify({ ok: false, error: claimError.message }), { status: 500, headers: { "content-type": "application/json" } });
 
