@@ -13,6 +13,8 @@ export default function InviteAccept({ token }: { token: string }) {
     try {
       const result = await workspaceRequest<{ workspace?: unknown }>('accept-invite', { token });
       if (result.workspace) {
+        const workspace = result.workspace as { workspace_id?: string };
+        if (workspace.workspace_id) window.localStorage.setItem('smm-workspace-id', workspace.workspace_id);
         setAccepted(true);
         window.setTimeout(() => window.location.assign('/'), 600);
       }
