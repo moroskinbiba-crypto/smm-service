@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { healthcheck, publish, type Platform, type MediaItem } from "./social.ts";
+import { fetchMetrics, healthcheck, publish, type Platform, type MediaItem } from "./social.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -311,6 +311,37 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "refresh-metrics":
+        {
+          const { data: targets, error: targetsError } = await ctx.admin.from("post_targets")
+            .select("id,platform,social_account_id,external_post_id,social_accounts!inner(id,platform,external_id),posts!inner(workspace_id)")
+            .eq("posts.workspace_id", ctx.workspace.workspace_id)
+            .eq("status", "published")
+            .limit(500);
+          if (targetsError) throw targetsError;
+          let refreshed = 0;
+          const errors: string[] = [];
+          for (const target of targets ?? []) {
+            if (!target.external_post_id) continue;
+            try {
+              const account = target.social_accounts;
+              const secret = await getSecret(ctx.admin, account.id);
+              const metrics = await fetchMetrics(account.platform as Platform, secret ?? {}, account.external_id ?? "", target.external_post_id);
+              if (Object.keys(metrics).length) {
+                const { error } = await ctx.admin.from("post_targets").update({
+                  metrics,
+                  updated_at: new Date().toISOString(),
+                }).eq("id", target.id);
+                if (error) throw error;
+                refreshed++;
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              errors.push(message);
+            }
+          }
+          return json({ ok: true, refreshed, errors: errors.slice(0, 20) });
+        }
       case "stats":
         {
           const from = body.from ? new Date(body.from).toISOString() : new Date(Date.now() - 30 * 86400000).toISOString();
