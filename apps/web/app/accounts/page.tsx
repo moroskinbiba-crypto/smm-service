@@ -16,6 +16,7 @@ const meta: Record<Platform,{name:string;icon:string;help:string}> = {
 
 type VkCandidate={id:string;name:string;screen_name:string|null;photo_100:string|null};
 type MetaCandidate={page_id:string;page_name:string;page_access_token:string;instagram_id:string;instagram_username:string|null;instagram_name:string|null;profile_picture_url:string|null;account_type:string|null};
+type AccountGroup={id:string;name:string;description:string|null;account_ids:string[]};
 
 export default function AccountsPage(){
   const [accounts,setAccounts]=useState<SocialAccount[]>([]);
@@ -37,8 +38,22 @@ export default function AccountsPage(){
   const [oauthProvider,setOauthProvider]=useState<'vk'|'meta'|null>(null);
   const [maxConnect,setMaxConnect]=useState<{code:string;expires_at:string;bot_username:string;instructions:string}|null>(null);
   const [telegramConnect,setTelegramConnect]=useState<{mode:'channel'|'business';code:string;expires_at:string;bot_username:string;instructions:string;start_url?:string}|null>(null);
+  const [groups,setGroups]=useState<AccountGroup[]>([]);
+  const [groupName,setGroupName]=useState('');
+  const [groupDescription,setGroupDescription]=useState('');
+  const [groupAccountIds,setGroupAccountIds]=useState<string[]>([]);
+  const [editingGroupId,setEditingGroupId]=useState<string|null>(null);
+  const [groupBusy,setGroupBusy]=useState(false);
 
-  async function load(){const r=await appRequest<{accounts:SocialAccount[]}>('list-accounts');setAccounts(r.accounts??[]);return r.accounts??[]}
+  async function load(){
+    const [accountsResult,groupsResult]=await Promise.all([
+      appRequest<{accounts:SocialAccount[]}>('list-accounts'),
+      appRequest<{groups:AccountGroup[]}>('list-account-groups'),
+    ]);
+    setAccounts(accountsResult.accounts??[]);
+    setGroups(groupsResult.groups??[]);
+    return accountsResult.accounts??[];
+  }
   async function refreshHealth(list:SocialAccount[]){const targets=list.filter(a=>a.status==='connected');if(!targets.length)return;const checked=await Promise.all(targets.map(a=>appRequest<{account:SocialAccount}>('check-account',{account_id:a.id}).then(x=>x.account).catch(()=>a)));setAccounts(v=>v.map(a=>checked.find(x=>x.id===a.id)??a))}
   useEffect(()=>{
     let cancelled=false;
@@ -174,6 +189,53 @@ export default function AccountsPage(){
               <button className="secondary danger-button" onClick={()=>void disconnect(a.id)}>Отключить</button>
             </div>)}
             {!accounts.length&&<div className="empty small-empty">Пока нет подключённых аккаунтов.</div>}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-head"><h2>Группы аккаунтов</h2><span>{groups.length}</span></div>
+          <p className="section-copy">Создайте группы заранее: например «Основные», «Все соцсети», «Региональные». В публикации группа сразу подставит все входящие аккаунты, а отдельные аккаунты можно снять вручную.</p>
+          <div className="account-group-form">
+            <input value={groupName} onChange={e=>setGroupName(e.target.value)} placeholder="Название группы"/>
+            <input value={groupDescription} onChange={e=>setGroupDescription(e.target.value)} placeholder="Описание (необязательно)"/>
+            <div className="account-group-checks">
+              {accounts.filter(a=>a.status==='connected').map(a=><label className="account-group-check" key={a.id}>
+                <input type="checkbox" checked={groupAccountIds.includes(a.id)} onChange={e=>setGroupAccountIds(v=>e.target.checked?[...v,a.id]:v.filter(id=>id!==a.id))}/>
+                <span><strong>{a.display_name||a.username||a.external_id}</strong><small>{meta[a.platform as Platform]?.name??a.platform}</small></span>
+              </label>)}
+              {!accounts.some(a=>a.status==='connected')&&<div className="empty small-empty">Сначала подключите хотя бы один аккаунт.</div>}
+            </div>
+            <div className="modal-actions-left">
+              <button className="primary" disabled={groupBusy||!groupName.trim()} onClick={async()=>{
+                setGroupBusy(true);setMsg('');
+                try{
+                  await appRequest(editingGroupId?'update-account-group':'create-account-group',{
+                    ...(editingGroupId?{group_id:editingGroupId}:{}),
+                    name:groupName,
+                    description:groupDescription,
+                    account_ids:groupAccountIds,
+                  });
+                  setGroupName('');setGroupDescription('');setGroupAccountIds([]);setEditingGroupId(null);
+                  await load();
+                }catch(e){setMsg(e instanceof Error?e.message:'Не удалось сохранить группу')}
+                finally{setGroupBusy(false)}
+              }}>{groupBusy?'Сохраняем…':editingGroupId?'Сохранить группу':'Создать группу'}</button>
+              {editingGroupId&&<button className="secondary" onClick={()=>{setEditingGroupId(null);setGroupName('');setGroupDescription('');setGroupAccountIds([])}}>Отмена</button>}
+            </div>
+          </div>
+          <div className="account-group-list">
+            {groups.map(g=><div className="account-group-card" key={g.id}>
+              <div className="card-head"><div><h3>{g.name}</h3><small>{g.description||'Без описания'}</small></div><span>{g.account_ids.length}</span></div>
+              <div className="account-group-members">
+                {g.account_ids.map(id=>{const a=accounts.find(x=>x.id===id);return a?<span className="account-group-member" key={id}>{meta[a.platform as Platform]?.icon??'•'} {a.display_name||a.username||a.external_id}</span>:null})}
+                {!g.account_ids.length&&<small>Группа пустая</small>}
+              </div>
+              <div className="modal-actions-left">
+                <button className="secondary" onClick={()=>{setEditingGroupId(g.id);setGroupName(g.name);setGroupDescription(g.description||'');setGroupAccountIds(g.account_ids)}}>Изменить</button>
+                <button className="secondary danger-button" onClick={async()=>{if(!confirm('Удалить группу «'+g.name+'»?'))return;try{await appRequest('delete-account-group',{group_id:g.id});await load()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось удалить группу')}}}>Удалить</button>
+              </div>
+            </div>)}
+            {!groups.length&&<div className="empty small-empty">Групп пока нет. Создайте первую выше.</div>}
           </div>
         </section>
 
