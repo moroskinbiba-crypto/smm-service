@@ -260,6 +260,73 @@ async function loadPosts(ctx: any, body: any) {
   return { posts, workspace: ctx.workspace };
 }
 
+async function fetchCompetitorSnapshot(ctx: any, competitor: any) {
+  const { data: accounts, error: accountsError } = await ctx.admin.from("social_accounts")
+    .select("id,platform,external_id,metadata")
+    .eq("workspace_id", ctx.workspace.workspace_id)
+    .eq("platform", competitor.platform)
+    .eq("status", "connected")
+    .limit(1);
+  if (accountsError) throw accountsError;
+  const account = accounts?.[0];
+  if (!account) throw new Error("Для " + competitor.platform + " нужен хотя бы один подключённый аккаунт этой площадки");
+
+  const secret = await getSecret(ctx.admin, account.id);
+  if (competitor.platform === "vk") {
+    if (!secret?.access_token) throw new Error("VK token не найден");
+    const groupId = String(competitor.external_ref).replace(/^-/, "");
+    const group = await jsonResponseForAppApi("https://api.vk.com/method/groups.getById?" + new URLSearchParams({
+      access_token: secret.access_token, v: "5.199", group_id: groupId,
+    }).toString());
+    const info = Array.isArray(group.response) ? group.response[0] : group.response?.groups?.[0];
+    const wall = await jsonResponseForAppApi("https://api.vk.com/method/wall.get?" + new URLSearchParams({
+      access_token: secret.access_token, v: "5.199", owner_id: "-" + groupId, count: "100",
+    }).toString());
+    const posts = Array.isArray(wall.response?.items) ? wall.response.items : [];
+    const sevenDays = Date.now() - 7 * 86400000;
+    const recent = posts.filter((post: any) => Number(post.date ?? 0) * 1000 >= sevenDays);
+    const avgViews = posts.length ? Math.round(posts.reduce((sum: number, p: any) => sum + Number(p.views?.count ?? 0), 0) / posts.length) : 0;
+    const avgEngagement = posts.length ? Number((posts.reduce((sum: number, p: any) => sum + Number(p.likes?.count ?? 0) + Number(p.comments?.count ?? 0) + Number(p.reposts?.count ?? 0), 0) / posts.length).toFixed(2)) : 0;
+    const lastPost = posts[0]?.date ? new Date(Number(posts[0].date) * 1000).toISOString() : null;
+    return {
+      followers: Number(info?.members_count ?? info?.followers_count ?? 0),
+      posts_7d: recent.length,
+      avg_views: avgViews,
+      avg_engagement: avgEngagement,
+      last_post_at: lastPost,
+      metadata: { platform: "vk", group_id: groupId, sample_posts: posts.length },
+    };
+  }
+
+  if (competitor.platform === "telegram") {
+    if (!secret?.access_token) throw new Error("Telegram token не найден");
+    const base = "https://api.telegram.org/bot" + secret.access_token;
+    const chat = await jsonResponseForAppApi(base + "/getChat?chat_id=" + encodeURIComponent(competitor.external_ref));
+    const members = await jsonResponseForAppApi(base + "/getChatMemberCount?chat_id=" + encodeURIComponent(competitor.external_ref));
+    return {
+      followers: Number(members.result ?? 0),
+      posts_7d: 0,
+      avg_views: 0,
+      avg_engagement: 0,
+      last_post_at: null,
+      metadata: { platform: "telegram", title: chat.result?.title ?? null, username: chat.result?.username ?? null, note: "Для Telegram Bot API статистика публикаций конкурента доступна только при соответствующем доступе бота к каналу." },
+    };
+  }
+
+  throw new Error("Автоматический сбор пока поддержан для VK и Telegram");
+}
+
+async function jsonResponseForAppApi(url: string, init: RequestInit = {}) {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let data: any = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!response.ok || data?.error || data?.error_code) {
+    throw new Error(data?.error_msg || data?.description || data?.error?.message || "Внешний API вернул ошибку");
+  }
+  return data;
+}
+
 async function aiGenerate(inputText: string, mode: string, platform?: string) {
   const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
   if (!apiKey) {
@@ -832,6 +899,65 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "list-competitors":
+        {
+          const { data, error } = await ctx.admin.from("competitors")
+            .select("id,platform,name,external_ref,url,notes,active,created_at,updated_at,competitor_snapshots(id,followers,posts_7d,avg_views,avg_engagement,last_post_at,collected_at)")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .order("created_at", { ascending: false });
+          if (error) throw error;
+          return json({ ok: true, competitors: data ?? [] });
+        }
+      case "create-competitor":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const platform = String(body.platform || "");
+          const name = String(body.name || "").trim();
+          const externalRef = String(body.external_ref || "").trim();
+          if (!["telegram","vk","max","ok"].includes(platform)) throw new Error("Неподдерживаемая площадка");
+          if (!name || !externalRef) throw new Error("Название и идентификатор конкурента обязательны");
+          const { data, error } = await ctx.admin.from("competitors").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            platform,
+            name,
+            external_ref: externalRef,
+            url: typeof body.url === "string" ? body.url.trim() || null : null,
+            notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
+          }).select("id").single();
+          if (error) throw error;
+          return json({ ok: true, competitor_id: data.id });
+        }
+      case "delete-competitor":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const { error } = await ctx.admin.from("competitors").delete()
+            .eq("id", String(body.competitor_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
+      case "refresh-competitor":
+        {
+          const { data: competitor, error } = await ctx.admin.from("competitors")
+            .select("id,platform,name,external_ref,url,notes,active")
+            .eq("id", String(body.competitor_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .maybeSingle();
+          if (error) throw error;
+          if (!competitor) throw new Error("Конкурент не найден");
+          const snapshot = await fetchCompetitorSnapshot(ctx, competitor);
+          const { error: insertError } = await ctx.admin.from("competitor_snapshots").insert({
+            competitor_id: competitor.id,
+            followers: snapshot.followers,
+            posts_7d: snapshot.posts_7d,
+            avg_views: snapshot.avg_views,
+            avg_engagement: snapshot.avg_engagement,
+            last_post_at: snapshot.last_post_at,
+            metadata: snapshot.metadata,
+          });
+          if (insertError) throw insertError;
+          return json({ ok: true, snapshot });
+        }
       case "ai-generate":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
