@@ -260,7 +260,7 @@ Deno.serve(async (req: Request) => {
       case "bootstrap":
         return json({ ok: true, workspace: ctx.workspace });
       case "list-posts":
-        return json({ ok: true, posts: await loadPosts(ctx, body) });
+        return json({ ok: true, ...(await loadPosts(ctx, body)) });
       case "save-post":
         return json({ ok: true, post_id: await savePost(ctx, body) });
       case "delete-post":
