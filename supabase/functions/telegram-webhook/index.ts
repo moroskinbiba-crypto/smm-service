@@ -27,6 +27,10 @@ function parseStartCode(text: string) {
   const m = text.match(/^\/start\s+([A-Za-z0-9_-]{8,80})\s*$/i);
   return m?.[1] ?? null;
 }
+function parseNotificationCode(text: string) {
+  const m = text.match(/^\/start\s+notify_([A-Za-z0-9_-]{8,80})\s*$/i);
+  return m?.[1] ?? null;
+}
 
 async function claimChannel(admin: any, update: any, code: string, token: string, botUsername: string) {
   const chat = update?.channel_post?.chat;
@@ -114,6 +118,44 @@ async function claimChannel(admin: any, update: any, code: string, token: string
   }).catch(() => undefined);
 
   return Boolean(updated);
+}
+
+async function claimNotificationStart(admin: any, update: any, code: string, token: string, botUsername: string) {
+  const from = update?.message?.from;
+  const chatId = Number(update?.message?.chat?.id ?? 0);
+  if (!from?.id || !chatId) return false;
+
+  const { data: request, error } = await admin.from("telegram_notification_requests")
+    .select("id,user_id,workspace_id,code,expires_at,claimed_at")
+    .eq("code", code)
+    .is("claimed_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (error) throw error;
+  if (!request) return false;
+
+  await admin.from("telegram_notification_subscriptions").upsert({
+    user_id: request.user_id,
+    workspace_id: request.workspace_id,
+    telegram_user_id: Number(from.id),
+    chat_id: chatId,
+    bot_username: botUsername || null,
+    enabled: true,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+
+  await admin.from("telegram_notification_requests").update({
+    claimed_at: new Date().toISOString(),
+    telegram_user_id: Number(from.id),
+    chat_id: chatId,
+  }).eq("id", request.id);
+
+  await tg(token, "sendMessage", {
+    chat_id: chatId,
+    text: "✅ Уведомления TGRMLposting подключены. Бот будет присылать рубежи просмотров по площадкам и ежедневную общую статистику.",
+  }).catch(() => undefined);
+
+  return true;
 }
 
 async function registerBusinessUser(admin: any, update: any, code: string, token: string, botUsername: string) {
@@ -292,8 +334,13 @@ Deno.serve(async (req: Request) => {
       if (code) await claimChannel(admin, update, code, token, botUsername);
     } else if (type === "private_message") {
       const text = String(update.message?.text ?? "");
-      const code = parseStartCode(text);
-      if (code) await registerBusinessUser(admin, update, code, token, botUsername);
+      const notificationCode = parseNotificationCode(text);
+      if (notificationCode) {
+        await claimNotificationStart(admin, update, notificationCode, token, botUsername);
+      } else {
+        const code = parseStartCode(text);
+        if (code) await registerBusinessUser(admin, update, code, token, botUsername);
+      }
     } else if (type === "business_connection") {
       await claimBusinessConnection(admin, update, token, botUsername);
     } else if (type === "my_chat_member") {
