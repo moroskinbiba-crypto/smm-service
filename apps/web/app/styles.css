@@ -99,3 +99,24 @@
 .inbox-empty-state p{max-width:380px;opacity:.58;line-height:1.5}
 @media(max-width:1000px){.inbox-layout{grid-template-columns:1fr}.inbox-thread-items{max-height:420px}.inbox-conversation{min-height:520px}}
 @media(max-width:600px){.inbox-filters{display:grid}.inbox-filter-group{overflow:auto;flex-wrap:nowrap}.inbox-filter-group .secondary{white-space:nowrap}.inbox-thread{grid-template-columns:38px minmax(0,1fr) auto;padding:12px}.inbox-thread-icon{width:38px;height:38px}.inbox-message{max-width:92%}.inbox-composer-actions{align-items:stretch;flex-direction:column}.inbox-send{width:100%}}
+
+
+.approval-badge{margin-top:10px;padding:9px 11px;border-radius:11px;font-size:11px;font-weight:800}
+.approval-pending{background:#fff6df;color:#9a6800}
+.approval-approved{background:#e9f7ef;color:#1a7b49}
+.approval-rejected{background:#fff0f0;color:#b23b3b}
+.dark .approval-pending{background:#3a3020;color:#ffd783}
+.dark .approval-approved{background:#183126;color:#91e0b4}
+.dark .approval-rejected{background:#3a2222;color:#ffb3b3}
+.approval-list{display:grid;gap:18px}
+.approval-card{display:grid;gap:15px}
+.approval-card-head{display:flex;justify-content:space-between;gap:20px;align-items:start}
+.approval-card-head h2{margin:7px 0 5px;line-height:1.25}
+.approval-card-head>div>span{font-size:12px;opacity:.55}
+.approval-actions{display:flex;gap:7px;flex:none}
+.approval-button{width:auto;margin:0;min-width:110px}
+.approval-targets{display:flex;flex-wrap:wrap;gap:7px}
+.approval-target{padding:7px 9px;border:1px solid #e1e4ea;border-radius:9px;font-size:11px;opacity:.72}
+.dark .approval-target{border-color:#2a2e38}
+.approval-image{width:160px;height:110px;object-fit:cover;border-radius:12px}
+@media(max-width:700px){.approval-card-head{display:grid}.approval-actions{width:100%}.approval-button{flex:1}}
