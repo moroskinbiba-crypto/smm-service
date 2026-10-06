@@ -8,7 +8,9 @@ type Member = { user_id: string; display_name: string | null; role: string; crea
 type Invite = { invite_id: string; expires_at: string; used_at: string | null; created_at: string; role: string };
 type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
 
-function roleLabel(role: string) { return role === 'owner' || role === 'admin' ? 'Руководитель' : 'Сотрудник'; }
+function roleLabel(role: string) {
+  return ({owner:'Владелец',admin:'Администратор',editor:'Редактор',publisher:'Публикатор',approver:'Согласующий',viewer:'Наблюдатель'} as Record<string,string>)[role] ?? role;
+}
 
 export default function TeamPage() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -17,6 +19,7 @@ export default function TeamPage() {
   const [busy, setBusy] = useState(false);
   const [createdLink, setCreatedLink] = useState('');
   const [message, setMessage] = useState('');
+  const [inviteRole, setInviteRole] = useState('editor');
 
   async function load() {
     try {
@@ -43,7 +46,7 @@ export default function TeamPage() {
   async function createInvite() {
     setBusy(true); setMessage(''); setCreatedLink('');
     try {
-      const result = await workspaceRequest<{ invite?: { token?: string } }>('create-invite', { expires_in_hours: 168 });
+      const result = await workspaceRequest<{ invite?: { token?: string } }>('create-invite', { expires_in_hours: 168, role: inviteRole });
       if (result.invite?.token) {
         setCreatedLink(window.location.origin + '/invite/' + result.invite.token);
         await load();
