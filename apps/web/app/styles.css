@@ -241,3 +241,5 @@
 @media(max-width:1000px){.media-library-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:700px){.media-library-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:480px){.media-library-grid{grid-template-columns:1fr}}
+
+.plan-heading-actions{display:flex;align-items:center;gap:8px}.plan-heading-actions label{cursor:pointer}@media(max-width:600px){.plan-heading-actions{width:100%;justify-content:flex-end}}
