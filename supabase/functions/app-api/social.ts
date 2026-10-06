@@ -3,7 +3,7 @@ import md5 from "npm:md5@2.3.0";
 export type Platform = "telegram" | "vk" | "max" | "ok" | "instagram";
 export type Secret = { access_token: string | null; refresh_token?: string | null; client_secret?: string | null };
 export type MediaItem = { path: string; name?: string; type?: string; size?: number; order?: number; signed_url?: string };
-export type PublicationType = "feed" | "reel" | "story";
+export type PublicationType = "feed" | "reel" | "story" | "clip";
 
 async function jsonResponse(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
@@ -214,13 +214,43 @@ export async function vkHealth(secret: Secret, externalId?: string) {
   return { display_name: group?.name || (groupId ? `VK #${groupId}` : "VK"), username: group?.screen_name ? `@${group.screen_name}` : null };
 }
 
+async function vkUploadClip(secret: Secret, groupId: string, body: string, item: MediaItem) {
+  if (!secret.access_token) throw new Error("VK token не указан");
+  if (!item.signed_url) throw new Error("У VK-клипа отсутствует ссылка на видео");
+  const saveParams = new URLSearchParams({
+    access_token: secret.access_token,
+    v: "5.199",
+    group_id: groupId,
+    name: item.name || "Клип",
+    description: body || "",
+    wallpost: "0",
+    is_private: "0",
+    no_comments: "0",
+  });
+  const saved = await jsonResponse("https://api.vk.com/method/video.save?" + saveParams.toString());
+  const response = saved.response ?? {};
+  if (!response.upload_url || !response.video_id || response.owner_id === undefined) {
+    throw new Error("VK не вернул URL загрузки клипа");
+  }
+  const form = new FormData();
+  form.append("video_file", await fetchBlob(item.signed_url), item.name || "clip.mp4");
+  await uploadMultipart(response.upload_url, form);
+  return String(response.owner_id) + "_" + String(response.video_id);
+}
+
 export async function vkPublish(secret: Secret, ownerId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
   if (!secret.access_token) throw new Error("VK token не указан");
   if (publicationType === "story") throw new Error("VK Stories пока не подключены в этом проекте");
   const cleanGroupId = ownerId.replace(/^-/, "");
   const images = media.filter(m => !m.type?.startsWith("video/"));
   const videos = media.filter(m => m.type?.startsWith("video/"));
-  if (videos.length) throw new Error("Видео для VK сначала нужно подключить через видео upload API; текущий релиз принимает видео в MAX, Telegram и Instagram");
+
+  if (publicationType === "clip") {
+    if (videos.length !== 1 || media.length !== 1) throw new Error("VK Клип требует ровно один видеофайл");
+    return vkUploadClip(secret, cleanGroupId, body, videos[0]);
+  }
+
+  if (videos.length) throw new Error("Для видео VK выберите формат «Клип»");
   const attachments = images.length ? await vkUploadImages(secret, cleanGroupId, images) : [];
   const params = new URLSearchParams({
     access_token: secret.access_token,
@@ -229,7 +259,7 @@ export async function vkPublish(secret: Secret, ownerId: string, body: string, m
     message: body || " ",
   });
   if (attachments.length) params.set("attachments", attachments.join(","));
-  const result = await jsonResponse(`https://api.vk.com/method/wall.post?${params.toString()}`);
+  const result = await jsonResponse("https://api.vk.com/method/wall.post?" + params.toString());
   return String(result.response?.post_id ?? Date.now());
 }
 
@@ -390,11 +420,27 @@ export async function okPublish(secret: Secret, groupId: string, body: string, m
 }
 
 
-export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string) {
+export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string, publicationType: PublicationType = "feed") {
   if (!externalPostId) return {};
   if (platform === "vk") {
     if (!secret.access_token) throw new Error("VK token не указан");
     const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+    if (publicationType === "clip") {
+      const videoId = String(externalPostId).split("_").pop() || String(externalPostId);
+      const data = await jsonResponse("https://api.vk.com/method/video.get?" + new URLSearchParams({
+        access_token: secret.access_token,
+        v: "5.199",
+        videos: String(ownerId) + "_" + videoId,
+        count: "1",
+      }).toString());
+      const video = data.response?.items?.[0] ?? data.response?.[0];
+      return {
+        views: Number(video?.views ?? video?.views_count ?? 0),
+        likes: Number(video?.likes?.count ?? video?.likes ?? 0),
+        comments: Number(video?.comments?.count ?? video?.comments ?? 0),
+        reposts: Number(video?.reposts?.count ?? video?.reposts ?? 0),
+      };
+    }
     const params = new URLSearchParams({
       access_token: secret.access_token,
       v: "5.199",
@@ -416,10 +462,10 @@ export async function fetchMetrics(platform: Platform, secret: Secret, externalI
     let saved = 0;
     let shares = 0;
     try {
-      const insights = await instagramGraph(`${encodeURIComponent(externalPostId)}/insights?metric=impressions,reach,saved,shares&access_token=${encodeURIComponent(secret.access_token)}`);
+      const insights = await instagramGraph(`${encodeURIComponent(externalPostId)}/insights?metric=impressions,reach,plays,saved,shares&access_token=${encodeURIComponent(secret.access_token)}`);
       for (const item of Array.isArray(insights.data) ? insights.data : []) {
         const value = Number(item.values?.[0]?.value ?? 0);
-        if (item.name === "impressions" || item.name === "reach") views = Math.max(views, value);
+        if (item.name === "impressions" || item.name === "reach" || item.name === "plays") views = Math.max(views, value);
         if (item.name === "saved") saved = value;
         if (item.name === "shares") shares = value;
       }
