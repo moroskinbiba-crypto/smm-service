@@ -1186,6 +1186,84 @@ Deno.serve(async (req: Request) => {
           const generated = await aiGenerate(text, mode, platform);
           return json({ ok: true, text: generated, mode, platform: platform ?? null });
         }
+      case "import-posts":
+        {
+          if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const rows = Array.isArray(body.rows) ? body.rows.slice(0, 100) : [];
+          if (!rows.length) throw new Error("CSV не содержит строк");
+          const { data: accounts, error: accountsError } = await ctx.admin.from("social_accounts")
+            .select("id,platform,status")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .eq("status", "connected");
+          if (accountsError) throw accountsError;
+
+          const platformAliases: Record<string,string> = {
+            telegram:"telegram", tg:"telegram",
+            vk:"vk", vkontakte:"vk",
+            max:"max",
+            ok:"ok", odnoklassniki:"ok", одноклассники:"ok",
+          };
+          const errors: string[] = [];
+          const created: string[] = [];
+
+          for (let index = 0; index < rows.length; index++) {
+            const row = rows[index] ?? {};
+            const text = typeof row.text === "string" ? row.text.trim() : "";
+            if (!text) { errors.push("Строка " + (index + 2) + ": нет текста"); continue; }
+
+            const platformsRaw = typeof row.platforms === "string" ? row.platforms.trim() : "";
+            const requested = platformsRaw && platformsRaw.toLowerCase() !== "all"
+              ? platformsRaw.split(/[|;,]+/).map((item:string)=>platformAliases[item.trim().toLowerCase()] ?? item.trim().toLowerCase()).filter(Boolean)
+              : [];
+            const selectedAccounts = requested.length
+              ? (accounts ?? []).filter((account:any)=>requested.includes(account.platform))
+              : (accounts ?? []);
+
+            if (!selectedAccounts.length) {
+              errors.push("Строка " + (index + 2) + ": нет подключённых аккаунтов для указанных площадок");
+              continue;
+            }
+
+            let scheduledAt: string | null = null;
+            if (typeof row.date === "string" && row.date.trim()) {
+              const time = typeof row.time === "string" && row.time.trim() ? row.time.trim() : "12:00";
+              const candidate = new Date(row.date.trim() + "T" + time + ":00");
+              if (Number.isNaN(candidate.getTime()) || candidate.getTime() <= Date.now()) {
+                errors.push("Строка " + (index + 2) + ": дата/время некорректны или уже прошли");
+                continue;
+              }
+              scheduledAt = candidate.toISOString();
+            }
+
+            const { data: post, error: postError } = await ctx.admin.from("posts").insert({
+              workspace_id: ctx.workspace.workspace_id,
+              user_id: ctx.user.id,
+              body: text,
+              media: [],
+              status: scheduledAt ? "scheduled" : "draft",
+              scheduled_at: scheduledAt,
+              approval_status: "not_required",
+            }).select("id").single();
+            if (postError) { errors.push("Строка " + (index + 2) + ": " + postError.message); continue; }
+
+            const targetRows = selectedAccounts.map((account:any)=>({
+              post_id: post.id,
+              social_account_id: account.id,
+              platform: account.platform,
+              status: scheduledAt ? "pending" : "waiting",
+            }));
+            const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
+            if (targetError) {
+              await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
+              errors.push("Строка " + (index + 2) + ": " + targetError.message);
+              continue;
+            }
+
+            created.push(post.id);
+          }
+
+          return json({ ok: true, created, errors: errors.slice(0, 50) });
+        }
       case "bulk-delete-posts":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
