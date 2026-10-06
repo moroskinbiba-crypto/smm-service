@@ -122,7 +122,7 @@ async function sendTelegram(token: string, chatId: number, text: string) {
 Deno.serve(async (req: Request) => {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const botToken = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+  const botToken = Deno.env.get("TGRML_NOTIFY_BOT_TOKEN") ?? "";
   if (!url || !serviceKey || !botToken) return json({ ok: false, error: "Missing configuration" }, 500);
 
   const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
