@@ -5,7 +5,7 @@ function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-async function run() {
+async function run(reqToken: string) {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!url || !serviceKey) throw new Error("Missing server configuration");
@@ -25,11 +25,7 @@ async function run() {
     if (configError) throw configError;
     const scheduler = Array.isArray(config) ? config[0] : config;
     const expectedToken = scheduler?.cron_token ?? "";
-    const providedToken = Deno.env.get("PUBLICATION_DISPATCH_TOKEN") || "";
-    if (providedToken && reqHeaderToken !== providedToken) throw new Error("Unauthorized");
-    if (!providedToken) {
-      throw new Error("Missing dispatcher token");
-    }
+    if (!expectedToken || reqToken !== expectedToken) throw new Error("Unauthorized");
     if (scheduler?.enabled !== true) {
       if (runId) await supabase.from("scheduler_runs").update({
         status: "success", finished_at: new Date().toISOString(), duration_ms: Date.now() - started,
@@ -37,8 +33,6 @@ async function run() {
       }).eq("id", runId);
       return { ok: true, enabled: false, queued: 0, recovered: 0 };
     }
-    if (reqHeaderToken !== expectedToken) throw new Error("Unauthorized");
-
     const { data: recovered, error: recoverError } = await supabase.rpc("recover_stale_publication_targets", { p_limit: 200 });
     if (recoverError) throw recoverError;
 
@@ -67,12 +61,11 @@ async function run() {
   }
 }
 
-let reqHeaderToken = "";
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
-  reqHeaderToken = req.headers.get("x-cron-token") ?? "";
+  const reqToken = req.headers.get("x-cron-token") ?? "";
   try {
-    return json(await run());
+    return json(await run(reqToken));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return json({ ok: false, error: message }, message === "Unauthorized" ? 401 : 500);
