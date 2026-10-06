@@ -16,101 +16,6 @@ async function api(url: string, init: RequestInit = {}) {
   return data;
 }
 
-async function secret(admin: any, accountId: string) {
-  const { data, error } = await admin.rpc("get_social_account_secret", { p_social_account_id: accountId });
-  if (error) throw error;
-  return Array.isArray(data) ? data[0] : data;
-}
-
-function zonedParts(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  }).formatToParts(date);
-  const map: Record<string,string> = {};
-  for (const p of parts) map[p.type] = p.value;
-  return {
-    year: Number(map.year), month: Number(map.month), day: Number(map.day),
-    hour: Number(map.hour), minute: Number(map.minute), second: Number(map.second),
-  };
-}
-
-function utcForLocal(timeZone: string, year: number, month: number, day: number, hour = 0) {
-  const guess = new Date(Date.UTC(year, month - 1, day, hour, 0, 0));
-  const local = zonedParts(guess, timeZone);
-  const localAsUtc = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second);
-  const offset = localAsUtc - guess.getTime();
-  return new Date(Date.UTC(year, month - 1, day, hour, 0, 0) - offset);
-}
-
-function previousLocalDay(date: {year:number;month:number;day:number}) {
-  const d = new Date(Date.UTC(date.year, date.month - 1, date.day));
-  d.setUTCDate(d.getUTCDate() - 1);
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
-}
-
-function platformLabel(platform: string) {
-  return ({ telegram: "Telegram", vk: "VK", max: "MAX", ok: "Одноклассники", instagram: "Instagram" } as Record<string,string>)[platform] ?? platform;
-}
-
-async function metricsFor(platform: string, accessToken: string, externalId: string, externalPostId: string, publicationType: string) {
-  if (!accessToken || !externalPostId) return {};
-  if (platform === "vk") {
-    const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
-    if (publicationType === "clip") {
-      const videoId = String(externalPostId).split("_").pop() || String(externalPostId);
-      const data = await api("https://api.vk.com/method/video.get?" + new URLSearchParams({
-        access_token: accessToken, v: "5.199", videos: ownerId + "_" + videoId, count: "1",
-      }).toString());
-      const video = data.response?.items?.[0] ?? data.response?.[0] ?? {};
-      return {
-        views: Number(video.views ?? video.views_count ?? 0),
-        likes: Number(video.likes?.count ?? video.likes ?? 0),
-        comments: Number(video.comments?.count ?? video.comments ?? 0),
-        reposts: Number(video.reposts?.count ?? video.reposts ?? 0),
-      };
-    }
-    const data = await api("https://api.vk.com/method/wall.getById?" + new URLSearchParams({
-      access_token: accessToken, v: "5.199", posts: ownerId + "_" + externalPostId,
-    }).toString());
-    const post = data.response?.[0] ?? {};
-    return {
-      views: Number(post.views?.count ?? 0),
-      likes: Number(post.likes?.count ?? 0),
-      comments: Number(post.comments?.count ?? 0),
-      reposts: Number(post.reposts?.count ?? 0),
-    };
-  }
-  if (platform === "instagram") {
-    const version = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
-    const base = "https://graph.facebook.com/" + version + "/";
-    const media = await api(base + encodeURIComponent(externalPostId) + "?fields=like_count,comments_count&access_token=" + encodeURIComponent(accessToken));
-    let views = 0;
-    let shares = 0;
-    try {
-      const insights = await api(base + encodeURIComponent(externalPostId) + "/insights?metric=impressions,reach,plays,shares&access_token=" + encodeURIComponent(accessToken));
-      for (const item of Array.isArray(insights.data) ? insights.data : []) {
-        const value = Number(item.values?.[0]?.value ?? 0);
-        if (["impressions","reach","plays"].includes(item.name)) views = Math.max(views, value);
-        if (item.name === "shares") shares = value;
-      }
-    } catch {}
-    return { views, likes: Number(media.like_count ?? 0), comments: Number(media.comments_count ?? 0), reposts: shares };
-  }
-  if (platform === "max") {
-    const data = await api("https://platform-api2.max.ru/messages/" + encodeURIComponent(externalPostId), { headers: { Authorization: accessToken } });
-    const stat = data.stat ?? {};
-    return {
-      views: Number(stat.views ?? stat.view_count ?? 0),
-      likes: Number(stat.likes ?? stat.reactions?.likes ?? 0),
-      comments: Number(stat.comments ?? stat.comments_count ?? 0),
-      reposts: Number(stat.reposts ?? stat.repost_count ?? 0),
-    };
-  }
-  return {};
-}
-
 async function sendTelegram(token: string, chatId: number, text: string) {
   await api("https://api.telegram.org/bot" + token + "/sendMessage", {
     method: "POST",
@@ -156,7 +61,7 @@ Deno.serve(async (req: Request) => {
     const startPrevious = utcForLocal(timeZone, previousDay.year, previousDay.month, previousDay.day, 0);
 
     const { data: accounts } = await admin.from("social_accounts")
-      .select("id,platform,external_id,metadata")
+      .select("id,platform")
       .eq("workspace_id", workspaceId)
       .eq("status", "connected");
 
@@ -170,18 +75,8 @@ Deno.serve(async (req: Request) => {
     const daily: Record<string,{views:number;likes:number;comments:number;reposts:number;published:number}> = {};
 
     for (const target of targets ?? []) {
-      const account = accountMap.get(target.social_account_id) as any;
-      if (!account) continue;
       let metrics = target.metrics ?? {};
-      try {
-        const s = await secret(admin, account.id);
-        const fresh = await metricsFor(account.platform, s?.access_token ?? "", account.external_id ?? "", target.external_post_id ?? "", target.publication_type || "feed");
-        if (Object.keys(fresh).length) {
-          metrics = { ...metrics, ...fresh };
-          await admin.from("post_targets").update({ metrics, updated_at: new Date().toISOString() }).eq("id", target.id);
-        }
-      } catch {}
-      const platform = account.platform;
+      const platform = target.platform;
       totals[platform] ||= { views:0, likes:0, comments:0, reposts:0, published:0 };
       totals[platform].views += Number(metrics.views ?? 0);
       totals[platform].likes += Number(metrics.likes ?? 0);
