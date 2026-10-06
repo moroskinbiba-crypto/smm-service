@@ -179,7 +179,7 @@ Deno.serve(async (req: Request) => {
 
   for (const item of Array.isArray(claimed) ? claimed : []) {
     const { data: target, error: targetError } = await supabase.from("post_targets")
-      .select("id,post_id,platform,social_account_id,attempts,posts!inner(id,body,media,status,workspace_id),social_accounts!inner(id,platform,external_id,metadata,status)")
+      .select("id,post_id,platform,publication_type,social_account_id,attempts,posts!inner(id,body,media,status,workspace_id),social_accounts!inner(id,platform,external_id,metadata,status)")
       .eq("id", item.target_id)
       .maybeSingle();
 
@@ -196,7 +196,7 @@ Deno.serve(async (req: Request) => {
       const post = target.posts;
       const secret = await getSecret(supabase, account.id);
       const media = await signedMedia(supabase, post.media);
-      const externalPostId = await publish(account.platform, secret ?? {}, account.external_id ?? "", post.body ?? "", media, account.metadata ?? {});
+      const externalPostId = await publish(account.platform, secret ?? {}, account.external_id ?? "", post.body ?? "", media, account.metadata ?? {}, target.publication_type || "feed");
 
       await supabase.from("post_targets").update({
         status: "published",
