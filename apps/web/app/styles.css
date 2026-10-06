@@ -276,3 +276,5 @@
 .oauth-candidate img{width:100%;height:100%;object-fit:cover}
 .oauth-candidate>span:last-child{display:grid;gap:4px}.oauth-candidate small{font-size:10px;opacity:.55}
 .manual-fallback{margin-top:10px}
+
+.max-connect-code{display:grid;gap:7px;margin-top:10px;padding:12px;border:1px solid #dfe3ea;border-radius:12px;background:#f7f8fa}.dark .max-connect-code{border-color:#2a2e38;background:#20242c}.max-connect-code strong{font-size:15px}.max-connect-code code{padding:9px;border-radius:9px;background:#eef1f5;font-weight:800}.dark .max-connect-code code{background:#252932}.max-connect-code span,.max-connect-code small{font-size:10px;opacity:.58}
