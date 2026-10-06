@@ -71,7 +71,9 @@ type BestHour = { hour:number; published:number; views:number; engagement:number
 type BenchmarkAccount = { account_id:string; platform:string; name:string; published:number; failed:number; views:number; likes:number; comments:number; reposts:number; engagement:number; engagement_rate:number; avg_views:number; success_rate:number; rank:number };
 
 export default function StatsPage() {
-  const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
+  const [period, setPeriod] = useState<'7' | '30' | '90' | 'custom'>('30');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [daily, setDaily] = useState<Daily[]>([]);
@@ -83,8 +85,11 @@ export default function StatsPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
-    const end = new Date();
-    const start = new Date(Date.now() - Number(period) * 86400000);
+    const end = period === 'custom' && customTo ? new Date(customTo + 'T23:59:59') : new Date();
+    const start = period === 'custom' && customFrom ? new Date(customFrom + 'T00:00:00') : new Date(Date.now() - Number(period === 'custom' ? 30 : period) * 86400000);
+    if (start.getTime() > end.getTime()) {
+      throw new Error('Начало периода не может быть позже конца');
+    }
     const r = await appRequest<{ summary: Summary; by_platform: Platform[]; daily: Daily[]; comparison: Comparison; top_posts: TopPost[]; best_hours: BestHour[]; by_account: BenchmarkAccount[] }>(
       'stats',
       { from: start.toISOString(), to: end.toISOString() },
@@ -100,7 +105,7 @@ export default function StatsPage() {
 
   useEffect(() => {
     void load().catch(e => setMsg(e instanceof Error ? e.message : 'Не удалось загрузить статистику'));
-  }, [period]);
+  }, [period, customFrom, customTo]);
 
   async function refreshMetrics() {
     setRefreshing(true);
@@ -150,7 +155,7 @@ export default function StatsPage() {
             <p>Публикации, охват и вовлечённость по подключённым площадкам.</p>
           </div>
           <div className="period-switch">
-            {([['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней']] as const).map(([id, name]) => (
+            {([['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней'], ['custom', 'Свой период']] as const).map(([id, name]) => (
               <button
                 key={id}
                 className={period === id ? 'secondary active-period' : 'secondary'}
@@ -160,7 +165,10 @@ export default function StatsPage() {
               </button>
             ))}
           </div>
-        </div>
+        {period === 'custom' && <div className="stats-custom-period card">
+          <label>С <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)} /></label>
+          <label>По <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)} /></label>
+        </div>}
 
         <div className="stats-grid">
           {cards.map(card => (
@@ -277,6 +285,7 @@ export default function StatsPage() {
         </section>
 
         <div className="stats-actions">
+          <button className="secondary" onClick={() => window.print()}>Печать / PDF</button>
           <button className="secondary" onClick={() => {
             const rows = [['Период','Публикации','Опубликовано','Просмотры','Лайки','Комментарии','Репосты','Клики','ER','CTR'],[period,summary?.posts??0,summary?.published??0,summary?.views??0,summary?.likes??0,summary?.comments??0,summary?.reposts??0,summary?.clicks??0,summary?.engagement_rate??0,summary?.ctr??0]];
             const csv = rows.map(row=>row.map(value=>String(value).replace(/"/g,'""')).map(value=>'"'+value+'"').join(',')).join('\n');
