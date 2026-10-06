@@ -272,3 +272,285 @@ export async function publish(platform: Platform, secret: Secret, externalId: st
     case "ok": return okPublish(secret, externalId, body, metadata, media);
   }
 }
+
+
+export type InboxItem = {
+  external_thread_id: string;
+  external_message_id: string;
+  thread_type: "message" | "comment";
+  message_type: "message" | "comment";
+  author_name: string | null;
+  author_external_id: string | null;
+  body: string;
+  parent_external_id?: string | null;
+  sent_at: string;
+  subject?: string | null;
+  participant_name?: string | null;
+  participant_external_id?: string | null;
+  post_target_external_id?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type InboxSyncResult = {
+  items: InboxItem[];
+  metadata_patch?: Record<string, unknown>;
+};
+
+function isoFromUnix(value: unknown) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return new Date().toISOString();
+  return new Date(n > 10_000_000_000 ? n : n * 1000).toISOString();
+}
+
+export async function telegramSyncInbox(secret: Secret, metadata: Record<string, unknown>): Promise<InboxSyncResult> {
+  if (!secret.access_token) throw new Error("Telegram token не указан");
+  const base = `https://api.telegram.org/bot${secret.access_token}`;
+  const offset = Number(metadata.inbox_update_offset ?? 0);
+  const params = new URLSearchParams();
+  if (offset > 0) params.set("offset", String(offset));
+  params.set("limit", "100");
+  params.set("timeout", "1");
+  params.set("allowed_updates", JSON.stringify(["message", "edited_message"]));
+  const result = await jsonResponse(`${base}/getUpdates?${params.toString()}`);
+  const updates = Array.isArray(result.result) ? result.result : [];
+  const items: InboxItem[] = [];
+  let nextOffset = offset;
+
+  for (const update of updates) {
+    const message = update?.message ?? update?.edited_message;
+    nextOffset = Math.max(nextOffset, Number(update?.update_id ?? 0) + 1);
+    if (!message?.message_id || !message?.chat?.id) continue;
+    if (!message?.from?.id) continue;
+    if (!message?.text && !message?.caption) continue;
+    items.push({
+      external_thread_id: String(message.chat.id),
+      external_message_id: `tg:${update.update_id}:${message.message_id}`,
+      thread_type: "message",
+      message_type: "message",
+      author_name: [message.from.first_name, message.from.last_name].filter(Boolean).join(" ") || message.from.username || String(message.from.id),
+      author_external_id: String(message.from.id),
+      body: String(message.text ?? message.caption ?? ""),
+      sent_at: isoFromUnix(message.date),
+      subject: message.chat.title || message.chat.username || String(message.chat.id),
+      participant_name: [message.from.first_name, message.from.last_name].filter(Boolean).join(" ") || message.from.username || String(message.from.id),
+      participant_external_id: String(message.from.id),
+      metadata: { chat_type: message.chat.type, chat_title: message.chat.title ?? null, telegram_update_id: update.update_id, telegram_message_id: message.message_id },
+    });
+  }
+
+  return { items, metadata_patch: { inbox_update_offset: nextOffset } };
+}
+
+export async function telegramSendInboxReply(secret: Secret, threadId: string, body: string) {
+  if (!secret.access_token) throw new Error("Telegram token не указан");
+  if (!threadId) throw new Error("Не указан chat_id Telegram");
+  const base = `https://api.telegram.org/bot${secret.access_token}`;
+  const result = await jsonResponse(`${base}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: threadId, text: body }),
+  });
+  return {
+    external_message_id: `tg-out:${result.result?.message_id ?? Date.now()}`,
+    sent_at: isoFromUnix(result.result?.date),
+  };
+}
+
+export async function vkSyncInbox(secret: Secret, externalId: string, publishedTargets: Array<{ external_post_id: string; published_at?: string | null }>): Promise<InboxSyncResult> {
+  if (!secret.access_token) throw new Error("VK token не указан");
+  const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+  const items: InboxItem[] = [];
+
+  for (const target of publishedTargets.slice(-30)) {
+    if (!target.external_post_id) continue;
+    const params = new URLSearchParams({
+      access_token: secret.access_token,
+      v: "5.199",
+      owner_id: ownerId,
+      post_id: target.external_post_id,
+      need_likes: "0",
+      extended: "1",
+      count: "100",
+    });
+    const data = await jsonResponse("https://api.vk.com/method/wall.getComments?" + params.toString());
+    const response = data.response ?? {};
+    const comments = Array.isArray(response.items) ? response.items : [];
+    const profiles = Array.isArray(response.profiles) ? response.profiles : [];
+    const profileMap = new Map<number, any>(profiles.map((p: any) => [Number(p.id), p]));
+
+    for (const comment of comments) {
+      if (!comment?.id || !comment?.from_id) continue;
+      const profile = profileMap.get(Number(comment.from_id));
+      const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || String(comment.from_id);
+      items.push({
+        external_thread_id: `vk:${ownerId}:${target.external_post_id}`,
+        external_message_id: `vk:${ownerId}:${target.external_post_id}:${comment.id}`,
+        thread_type: "comment",
+        message_type: "comment",
+        author_name: name,
+        author_external_id: String(comment.from_id),
+        body: String(comment.text ?? ""),
+        parent_external_id: comment.reply_to_comment ? String(comment.reply_to_comment) : null,
+        sent_at: isoFromUnix(comment.date),
+        subject: `VK #${target.external_post_id}`,
+        participant_name: name,
+        participant_external_id: String(comment.from_id),
+        post_target_external_id: target.external_post_id,
+        metadata: { vk_comment_id: comment.id, vk_owner_id: Number(ownerId), vk_post_id: Number(target.external_post_id), can_reply: true },
+      });
+    }
+  }
+
+  return { items };
+}
+
+export async function vkSendInboxReply(secret: Secret, ownerId: string, postId: string, replyToCommentId: string | null, body: string) {
+  if (!secret.access_token) throw new Error("VK token не указан");
+  const params = new URLSearchParams({
+    access_token: secret.access_token,
+    v: "5.199",
+    owner_id: ownerId.startsWith("-") ? ownerId : "-" + ownerId,
+    post_id: postId,
+    message: body,
+  });
+  if (replyToCommentId) params.set("reply_to_comment", replyToCommentId);
+  const data = await jsonResponse("https://api.vk.com/method/wall.createComment?" + params.toString());
+  const commentId = data.response?.comment_id ?? Date.now();
+  return {
+    external_message_id: `vk-out:${ownerId}:${postId}:${commentId}`,
+    sent_at: new Date().toISOString(),
+    external_comment_id: String(commentId),
+  };
+}
+
+export async function maxSyncInbox(secret: Secret, externalId: string, publishedTargets: Array<{ external_post_id: string; published_at?: string | null }>): Promise<InboxSyncResult> {
+  if (!secret.access_token) throw new Error("MAX token не указан");
+  const headers = { Authorization: secret.access_token };
+  const me = await jsonResponse("https://platform-api2.max.ru/me", { headers });
+  const botId = String(me.user_id ?? "");
+  const items: InboxItem[] = [];
+
+  if (externalId) {
+    const data = await jsonResponse(`https://platform-api2.max.ru/messages?chat_id=${encodeURIComponent(externalId)}`, { headers });
+    const messages = Array.isArray(data.messages) ? data.messages : Array.isArray(data) ? data : [];
+    for (const message of messages.slice(-100)) {
+      const senderId = String(message?.sender?.user_id ?? "");
+      if (!message?.body?.text && !message?.body?.attachments) continue;
+      if (senderId && senderId === botId) continue;
+      const text = String(message?.body?.text ?? "");
+      if (!text) continue;
+      const author = message?.sender?.name || message?.sender?.username || senderId || "Пользователь";
+      items.push({
+        external_thread_id: String(externalId),
+        external_message_id: `max:${message.id ?? message.mid}`,
+        thread_type: "message",
+        message_type: "message",
+        author_name: author,
+        author_external_id: senderId || null,
+        body: text,
+        sent_at: isoFromUnix(message.timestamp),
+        subject: message?.recipient?.title || String(externalId),
+        participant_name: author,
+        participant_external_id: senderId || null,
+        metadata: { max_message_id: message.id ?? message.mid, max_chat_id: externalId },
+      });
+    }
+  }
+
+  for (const target of publishedTargets.slice(-20)) {
+    if (!target.external_post_id) continue;
+    try {
+      const data = await jsonResponse(`https://platform-api2.max.ru/messages/${encodeURIComponent(target.external_post_id)}/comments`, { headers });
+      const comments = Array.isArray(data.comments) ? data.comments : Array.isArray(data.messages) ? data.messages : [];
+      for (const comment of comments) {
+        const senderId = String(comment?.sender?.user_id ?? "");
+        if (senderId && senderId === botId) continue;
+        const text = String(comment?.body?.text ?? comment?.text ?? "");
+        if (!text) continue;
+        const author = comment?.sender?.name || comment?.sender?.username || senderId || "Пользователь";
+        items.push({
+          external_thread_id: `max-comment:${target.external_post_id}`,
+          external_message_id: `max-comment:${comment.id ?? comment.mid}`,
+          thread_type: "comment",
+          message_type: "comment",
+          author_name: author,
+          author_external_id: senderId || null,
+          body: text,
+          sent_at: isoFromUnix(comment.timestamp),
+          subject: `MAX ${target.external_post_id}`,
+          participant_name: author,
+          participant_external_id: senderId || null,
+          post_target_external_id: target.external_post_id,
+          metadata: { max_comment_id: comment.id ?? comment.mid, max_post_id: target.external_post_id },
+        });
+      }
+    } catch {
+      // Some MAX accounts are chats without channel comments. Keep the inbox usable.
+    }
+  }
+
+  return { items };
+}
+
+export async function maxSendInboxReply(secret: Secret, threadId: string, body: string, messageType: "message" | "comment", postId?: string | null) {
+  if (!secret.access_token) throw new Error("MAX token не указан");
+  const headers = { Authorization: secret.access_token, "content-type": "application/json" };
+
+  if (messageType === "comment" && postId) {
+    const data = await jsonResponse(`https://platform-api2.max.ru/messages/${encodeURIComponent(postId)}/comments`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: body }),
+    });
+    return { external_message_id: `max-out-comment:${data.message?.id ?? data.message?.mid ?? Date.now()}`, sent_at: isoFromUnix(data.message?.timestamp), post_id: postId };
+  }
+
+  const data = await jsonResponse(`https://platform-api2.max.ru/messages?chat_id=${encodeURIComponent(threadId)}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ text: body }),
+  });
+  return { external_message_id: `max-out:${data.message?.body?.mid ?? data.message?.mid ?? Date.now()}`, sent_at: isoFromUnix(data.message?.timestamp) };
+}
+
+export async function okSyncInbox(secret: Secret, metadata: Record<string, unknown>): Promise<InboxSyncResult> {
+  const accessToken = secret.access_token;
+  const chatId = typeof metadata.inbox_chat_id === "string" ? metadata.inbox_chat_id : "";
+  if (!accessToken || !chatId) return { items: [] };
+
+  const data = await jsonResponse("https://api.ok.ru/graph/" + encodeURIComponent(chatId) + "/messages?access_token=" + encodeURIComponent(accessToken) + "&count=50");
+  const messages = Array.isArray(data.messages) ? data.messages : [];
+  const items: InboxItem[] = [];
+  for (const message of messages) {
+    const authorId = message?.sender?.user_id ? String(message.sender.user_id) : null;
+    const body = String(message?.text ?? "");
+    if (!body) continue;
+    const author = String(message?.sender?.name ?? authorId ?? "Пользователь");
+    items.push({
+      external_thread_id: chatId,
+      external_message_id: `ok:${message?.mid ?? message?.message_id ?? Date.now()}`,
+      thread_type: "message",
+      message_type: "message",
+      author_name: author,
+      author_external_id: authorId,
+      body,
+      sent_at: isoFromUnix(message?.timestamp),
+      subject: chatId,
+      participant_name: author,
+      participant_external_id: authorId,
+      metadata: { ok_message_id: message?.mid ?? message?.message_id, ok_chat_id: chatId },
+    });
+  }
+  return { items };
+}
+
+export async function okSendInboxReply(secret: Secret, threadId: string, body: string) {
+  const accessToken = secret.access_token;
+  if (!accessToken) throw new Error("ОК token не указан");
+  const data = await jsonResponse("https://api.ok.ru/graph/" + encodeURIComponent(threadId) + "/messages?access_token=" + encodeURIComponent(accessToken), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ recipient: { chat_id: threadId }, message: { text: body } }),
+  });
+  return { external_message_id: `ok-out:${data.mid ?? data.message?.mid ?? Date.now()}`, sent_at: new Date().toISOString() };
+}
