@@ -476,6 +476,9 @@ function isoFromUnix(value: unknown) {
 
 export async function telegramSyncInbox(secret: Secret, metadata: Record<string, unknown>): Promise<InboxSyncResult> {
   if (!secret.access_token) throw new Error("Telegram token не указан");
+  if (metadata.connection_method === "service_bot" || metadata.connection_method === "business_bot") {
+    return { items: [] };
+  }
   const base = `https://api.telegram.org/bot${secret.access_token}`;
   const offset = Number(metadata.inbox_update_offset ?? 0);
   const params = new URLSearchParams();
