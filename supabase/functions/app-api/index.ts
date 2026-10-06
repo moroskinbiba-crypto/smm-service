@@ -943,6 +943,44 @@ Deno.serve(async (req: Request) => {
           try { bot = await jsonResponseForAppApi("https://platform-api2.max.ru/me", { headers: { Authorization: botToken } }); } catch {}
           return json({ ok: true, configured: true, bot_username: bot.username || botUsername, bot_name: bot.name || botUsername });
         }
+      case "max-connect-service-bot":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
+          const chatId = String(body.chat_id || "").trim();
+          const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+          if (!token || !chatId) throw new Error("Служебный MAX-бот не настроен или chat_id не указан");
+          const chat = await jsonResponseForAppApi("https://platform-api2.max.ru/chats/" + encodeURIComponent(chatId), { headers: { Authorization: token } });
+          const metadata = { connection_method: "service_bot", bot_username: Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? null, chat_type: chat.type ?? null };
+          const { data: account, error: accountError } = await ctx.admin.from("social_accounts").insert({
+            user_id: ctx.user.id,
+            workspace_id: ctx.workspace.workspace_id,
+            platform: "max",
+            external_id: chatId,
+            display_name: chat.title || chat.name || "MAX",
+            username: chat.link ? String(chat.link) : null,
+            status: "pending",
+            metadata,
+          }).select("id").single();
+          if (accountError) throw accountError;
+          try {
+            await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: token });
+            const secret = await getSecret(ctx.admin, account.id);
+            const checked = await healthcheck("max", secret ?? {}, chatId, metadata);
+            const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
+              status: "connected",
+              last_error: null,
+              display_name: chat.title || chat.name || checked.display_name || "MAX",
+              username: checked.username || null,
+              updated_at: new Date().toISOString(),
+            }).eq("id", account.id).select("*").single();
+            if (updateError) throw updateError;
+            return json({ ok: true, account: updated });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.admin.from("social_accounts").update({ status: "error", last_error: message }).eq("id", account.id);
+            throw new Error(message);
+          }
+        }
       case "max-resolve-chat":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
