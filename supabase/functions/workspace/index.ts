@@ -69,7 +69,58 @@ Deno.serve(async (req: Request) => {
       case "members": {
         const { data, error } = await admin.rpc("list_workspace_members_for_user", { p_user_id: user.id });
         if (error) throw error;
-        return json({ ok: true, members: data ?? [] });
+        const workspaceId = Array.isArray(data) && data[0] ? data[0].workspace_id : null;
+        let enriched = data ?? [];
+        if (workspaceId) {
+          const { data: memberRows, error: memberError } = await admin.from("workspace_members")
+            .select("user_id,invited_by")
+            .eq("workspace_id", workspaceId);
+          if (memberError) throw memberError;
+          const invitedBy = new Map((memberRows ?? []).map((row:any)=>[row.user_id,row.invited_by]));
+          enriched = enriched.map((row:any)=>({ ...row, invited_by: invitedBy.get(row.user_id) ?? null }));
+        }
+        return json({ ok: true, members: enriched });
+      }
+      case "suspend-member": {
+        const targetUserId = String(body.user_id || "");
+        const suspended = body.suspended === true;
+        if (!targetUserId) throw new Error("Не указан пользователь");
+        if (targetUserId === user.id) throw new Error("Нельзя приостановить собственный аккаунт");
+
+        const { data: actor, error: actorError } = await admin.from("workspace_members")
+          .select("workspace_id,role")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (actorError) throw actorError;
+        if (!actor || !["owner","admin"].includes(actor.role)) throw new Error("Недостаточно прав");
+
+        const { data: target, error: targetError } = await admin.from("workspace_members")
+          .select("user_id,role,invited_by")
+          .eq("workspace_id", actor.workspace_id)
+          .eq("user_id", targetUserId)
+          .maybeSingle();
+        if (targetError) throw targetError;
+        if (!target) throw new Error("Участник не найден");
+        if (target.role === "owner") throw new Error("Владельца нельзя отключить из команды");
+        if (target.invited_by !== user.id) {
+          throw new Error("Руководитель может отключать только пользователей, которых пригласил лично");
+        }
+
+        const { error: profileError } = await admin.from("profiles").update({
+          suspended_at: suspended ? new Date().toISOString() : null,
+          suspended_reason: suspended ? "Приостановлено руководителем команды" : null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", targetUserId);
+        if (profileError) throw profileError;
+
+        const { error: banError } = await admin.auth.admin.updateUserById(targetUserId, {
+          ban_duration: suspended ? "876000h" : "none",
+        });
+        if (banError) throw banError;
+
+        return json({ ok: true, user_id: targetUserId, suspended });
       }
       case "set-member-role": {
         const targetUserId = String(body.user_id || "");
