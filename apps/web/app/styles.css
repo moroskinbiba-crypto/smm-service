@@ -49,3 +49,53 @@
 .admin-mini-row span{font-size:11px;opacity:.58}
 @media(max-width:1000px){.admin-stats{grid-template-columns:repeat(2,1fr)}.admin-team-content{grid-template-columns:1fr}}
 @media(max-width:600px){.admin-stats{grid-template-columns:1fr}.admin-user-row{grid-template-columns:1fr auto}.admin-user-row .secondary{grid-column:1/-1;width:100%}.admin-protected{justify-self:end}}
+
+
+.inbox-filters{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.inbox-filter-group{display:flex;gap:6px;flex-wrap:wrap}
+.inbox-layout{display:grid;grid-template-columns:minmax(320px,.85fr) minmax(0,1.35fr);gap:20px;min-height:620px}
+.inbox-thread-list{padding:0;overflow:hidden}
+.inbox-thread-list>.card-head{padding:20px 22px;border-bottom:1px solid #e7e9ee}
+.dark .inbox-thread-list>.card-head{border-color:#2a2e38}
+.inbox-thread-items{display:grid;max-height:760px;overflow:auto}
+.inbox-thread{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;padding:14px 16px;border:0;border-bottom:1px solid #e7e9ee;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.dark .inbox-thread{border-color:#2a2e38}
+.inbox-thread.active{background:#f1f3f7}
+.dark .inbox-thread.active{background:#242832}
+.inbox-thread:hover{background:#f5f6f8}
+.dark .inbox-thread:hover{background:#20242c}
+.inbox-thread-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:#eef1f5;font-weight:800}
+.dark .inbox-thread-icon{background:#252932}
+.inbox-thread-main{display:grid;gap:4px;min-width:0}
+.inbox-thread-top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.inbox-thread-top strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inbox-thread-top small{font-size:10px;opacity:.48;white-space:nowrap}
+.inbox-thread-meta{font-size:10px;opacity:.48}
+.inbox-thread-preview{font-size:12px;opacity:.68;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inbox-unread{align-self:start;min-width:22px;padding:4px 6px;border-radius:999px;background:#111;color:#fff;text-align:center;font-size:10px;font-weight:800}
+.dark .inbox-unread{background:#fff;color:#111}
+.inbox-conversation{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:620px}
+.inbox-conversation-head{display:flex;justify-content:space-between;align-items:start;gap:20px;padding-bottom:16px;border-bottom:1px solid #e7e9ee}
+.dark .inbox-conversation-head{border-color:#2a2e38}
+.inbox-conversation-head h2{margin:7px 0 4px;font-size:24px}
+.inbox-conversation-head>div>span{font-size:12px;opacity:.55}
+.inbox-messages{display:flex;flex-direction:column;gap:10px;padding:18px 4px;overflow:auto;max-height:560px}
+.inbox-message{align-self:flex-start;max-width:min(82%,680px);padding:11px 13px;border:1px solid #e1e4ea;border-radius:15px 15px 15px 5px;background:#f7f8fa}
+.dark .inbox-message{border-color:#2a2e38;background:#20242c}
+.inbox-message.outbound{align-self:flex-end;border-radius:15px 15px 5px 15px;background:#111;color:#fff;border-color:#111}
+.dark .inbox-message.outbound{background:#fff;color:#111;border-color:#fff}
+.inbox-message-author{font-size:10px;font-weight:800;opacity:.58;margin-bottom:4px}
+.inbox-message-body{font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.inbox-message-time{margin-top:5px;font-size:9px;opacity:.45;text-align:right}
+.inbox-composer{padding-top:14px;border-top:1px solid #e7e9ee}
+.dark .inbox-composer{border-color:#2a2e38}
+.inbox-composer textarea{width:100%;border:1px solid #dfe3ea;border-radius:14px;padding:13px;font:inherit;background:transparent;color:inherit;resize:vertical}
+.dark .inbox-composer textarea{border-color:#353945}
+.inbox-composer-actions{display:flex;align-items:end;justify-content:space-between;gap:12px}
+.inbox-composer-actions .auth-message{flex:1;margin-top:10px}
+.inbox-send{width:auto;min-width:130px}
+.inbox-empty-state{display:grid;place-items:center;align-content:center;min-height:560px;text-align:center;gap:4px}
+.inbox-empty-state h2{margin:8px 0 0}
+.inbox-empty-state p{max-width:380px;opacity:.58;line-height:1.5}
+@media(max-width:1000px){.inbox-layout{grid-template-columns:1fr}.inbox-thread-items{max-height:420px}.inbox-conversation{min-height:520px}}
+@media(max-width:600px){.inbox-filters{display:grid}.inbox-filter-group{overflow:auto;flex-wrap:nowrap}.inbox-filter-group .secondary{white-space:nowrap}.inbox-thread{grid-template-columns:38px minmax(0,1fr) auto;padding:12px}.inbox-thread-icon{width:38px;height:38px}.inbox-message{max-width:92%}.inbox-composer-actions{align-items:stretch;flex-direction:column}.inbox-send{width:100%}}
