@@ -913,6 +913,55 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "list-automation-rules":
+        {
+          const { data, error } = await ctx.admin.from("automation_rules")
+            .select("id,name,trigger_type,action_type,enabled,config,created_at,updated_at")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .order("created_at", { ascending: false });
+          if (error) throw error;
+          return json({ ok: true, rules: data ?? [] });
+        }
+      case "create-automation-rule":
+        {
+          if (!["owner","admin"].includes(ctx.workspace.role)) throw new Error("Настраивать автоматизацию может только руководитель");
+          const triggerType = String(body.trigger_type || "");
+          const actionType = String(body.action_type || "notify_team");
+          const name = String(body.name || "").trim();
+          if (!["publication_success","publication_failure","approval_requested","approval_reviewed"].includes(triggerType)) throw new Error("Неизвестный триггер");
+          if (actionType !== "notify_team") throw new Error("Неизвестное действие");
+          if (!name) throw new Error("Укажите название правила");
+          const { data, error } = await ctx.admin.from("automation_rules").insert({
+            workspace_id: ctx.workspace.workspace_id,
+            name,
+            trigger_type: triggerType,
+            action_type: actionType,
+            enabled: true,
+            config: typeof body.config === "object" && body.config ? body.config : {},
+            created_by: ctx.user.id,
+          }).select("id").single();
+          if (error) throw error;
+          return json({ ok: true, rule_id: data.id });
+        }
+      case "toggle-automation-rule":
+        {
+          if (!["owner","admin"].includes(ctx.workspace.role)) throw new Error("Настраивать автоматизацию может только руководитель");
+          const enabled = body.enabled === true;
+          const { error } = await ctx.admin.from("automation_rules").update({ enabled, updated_at: new Date().toISOString() })
+            .eq("id", String(body.rule_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
+      case "delete-automation-rule":
+        {
+          if (!["owner","admin"].includes(ctx.workspace.role)) throw new Error("Настраивать автоматизацию может только руководитель");
+          const { error } = await ctx.admin.from("automation_rules").delete()
+            .eq("id", String(body.rule_id || ""))
+            .eq("workspace_id", ctx.workspace.workspace_id);
+          if (error) throw error;
+          return json({ ok: true });
+        }
       case "list-notifications":
         {
           const { data, error } = await ctx.admin.from("notifications")
