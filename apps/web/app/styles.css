@@ -315,3 +315,22 @@
 .platform-tab .network-logo{width:24px;height:24px;font-size:10px;margin-right:6px}
 .connected-icon.network-logo{width:30px;height:30px;font-size:12px}
 .network-icon.network-logo{width:25px;height:25px;font-size:10px}
+
+
+.workspace-switcher{min-width:220px;max-width:300px;border:1px solid var(--line,#ddd);border-radius:12px;padding:9px 34px 9px 12px;background:var(--card,#fff);font:inherit;font-weight:600}
+.workspace-switcher:focus{outline:2px solid var(--accent,#111);outline-offset:1px}
+.account-group-list{display:grid;gap:12px}
+.account-group-card{border:1px solid var(--line,#ddd);border-radius:14px;padding:14px}
+.account-group-members{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.account-group-member{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line,#ddd);border-radius:999px;padding:6px 10px;font-size:13px}
+.account-group-form{display:grid;gap:10px}
+.account-group-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:240px;overflow:auto}
+.account-group-check{display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--line,#ddd);border-radius:10px}
+.workspace-limit-row{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.workspace-limit-input{width:90px}
+.editor-group-select{width:100%;margin-bottom:10px}
+.group-selection-note{font-size:12px;opacity:.7;margin:6px 0 10px}
+@media (max-width:900px){
+ .workspace-switcher{min-width:170px;max-width:220px}
+ .account-group-checks{grid-template-columns:1fr}
+}
