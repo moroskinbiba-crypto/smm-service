@@ -53,6 +53,36 @@ type Overview = {
   teams: AdminTeam[];
 };
 
+type SchedulerRun = {
+  id: number;
+  worker: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  claimed: number;
+  published: number;
+  failed: number;
+  recovered: number;
+  queued: number;
+  duration_ms: number | null;
+  error: string | null;
+};
+
+type QueueMetric = {
+  queue_name: string;
+  queue_length: number;
+  oldest_msg_age_sec: number | null;
+  total_messages: number;
+};
+
+type SchedulerHealth = {
+  due_publications: number;
+  due_metrics: number;
+  checked_at: string;
+  queues: QueueMetric[];
+  latest_runs: SchedulerRun[];
+};
+
 const platformNames: Record<string, string> = {
   telegram: 'Telegram',
   vk: 'VK',
@@ -75,11 +105,16 @@ export default function AdminPage() {
   const [message, setMessage] = useState('');
   const [filter, setFilter] = useState('');
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
+  const [scheduler, setScheduler] = useState<SchedulerHealth | null>(null);
 
   async function load() {
     setMessage('');
-    const result = await appRequest<Overview>('admin-overview');
+    const [result, health] = await Promise.all([
+      appRequest<Overview>('admin-overview'),
+      appRequest<SchedulerHealth>('scheduler-health'),
+    ]);
     setOverview(result);
+    setScheduler(health);
   }
 
   useEffect(() => {
@@ -136,6 +171,42 @@ export default function AdminPage() {
             <section className="card metric-card"><span>Соц. аккаунты</span><strong>{overview.summary.social_accounts}</strong><small>подключено</small></section>
             <section className="card metric-card"><span>Приостановлено</span><strong>{overview.summary.suspended}</strong><small>доступ заблокирован</small></section>
           </div>
+        )}
+
+        {scheduler && (
+          <section className="card admin-scheduler-card">
+            <div className="card-head">
+              <div>
+                <h2>Мониторинг очередей</h2>
+                <span>Проверено {date(scheduler.checked_at)}</span>
+              </div>
+              <button className="secondary" onClick={() => void load()}>Обновить</button>
+            </div>
+            <div className="admin-stats">
+              <section className="card metric-card"><span>Публикации к отправке</span><strong>{scheduler.due_publications}</strong><small>ожидают обработки</small></section>
+              <section className="card metric-card"><span>Метрики к обновлению</span><strong>{scheduler.due_metrics}</strong><small>ожидают обработки</small></section>
+              {scheduler.queues.map(queue => (
+                <section className="card metric-card" key={queue.queue_name}>
+                  <span>{queue.queue_name === 'publication_jobs' ? 'Очередь публикаций' : 'Очередь метрик'}</span>
+                  <strong>{queue.queue_length}</strong>
+                  <small>{queue.oldest_msg_age_sec == null ? 'пусто' : 'старейшая задача: ' + Math.round(queue.oldest_msg_age_sec) + ' c'}</small>
+                </section>
+              ))}
+            </div>
+            <div className="admin-mini-list">
+              {scheduler.latest_runs.slice(0, 6).map(run => (
+                <div className="admin-mini-row" key={run.id}>
+                  <div>
+                    <strong>{run.worker}</strong>
+                    <span>{date(run.started_at)} · {run.duration_ms ?? 0} мс</span>
+                  </div>
+                  <span className={run.status === 'success' ? 'admin-status active' : 'admin-status suspended'}>
+                    {run.status === 'success' ? 'OK' : 'Ошибка'} · queued {run.queued} · published {run.published} · failed {run.failed}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <section className="card">
