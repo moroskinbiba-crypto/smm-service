@@ -103,10 +103,22 @@ async function requireTargets(admin: any, workspaceId: string, ids: string[]) {
   return data;
 }
 
+function validateMedia(media: unknown) {
+  const items = Array.isArray(media) ? media : [];
+  for (const item of items) {
+    const type = typeof item?.type === "string" ? item.type : "";
+    const size = typeof item?.size === "number" ? item.size : 0;
+    if (!/^image\/(jpeg|png|webp)$/.test(type)) throw new Error("Поддерживаются только JPG, PNG и WebP");
+    if (size > 50 * 1024 * 1024) throw new Error("Размер файла не должен превышать 50 МБ");
+    if (typeof item?.path !== "string" || !item.path) throw new Error("У медиафайла отсутствует путь");
+  }
+  return items;
+}
+
 async function savePost(ctx: any, body: any) {
   if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав для публикации");
   const bodyText = typeof body.text === "string" ? body.text : "";
-  const media = Array.isArray(body.media) ? body.media : [];
+  const media = validateMedia(body.media);
   const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null;
   const targetAccounts = await requireTargets(ctx.admin, ctx.workspace.workspace_id, Array.isArray(body.target_account_ids) ? body.target_account_ids : []);
 
