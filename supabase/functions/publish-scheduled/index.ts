@@ -92,6 +92,48 @@ async function processRecurrences(admin: any) {
   return created;
 }
 
+async function runScheduledAutomations(admin: any, postId: string, status: string) {
+  const { data: post, error: postError } = await admin.from("posts")
+    .select("id,workspace_id,status")
+    .eq("id", postId)
+    .maybeSingle();
+  if (postError) throw postError;
+  if (!post) return;
+
+  const trigger = status === "published" ? "publication_success" : status === "failed" || status === "partially_published" ? "publication_failure" : null;
+  if (!trigger) return;
+
+  const { data: rules, error: rulesError } = await admin.from("automation_rules")
+    .select("id")
+    .eq("workspace_id", post.workspace_id)
+    .eq("enabled", true)
+    .eq("trigger_type", trigger);
+  if (rulesError) throw rulesError;
+  if (!rules?.length) return;
+
+  const { data: members, error: membersError } = await admin.from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", post.workspace_id);
+  if (membersError) throw membersError;
+
+  const title = trigger === "publication_success" ? "Публикация успешно вышла" : "Ошибка публикации";
+  const body = trigger === "publication_success"
+    ? "Запланированная публикация успешно отправлена."
+    : "Запланированная публикация завершилась ошибкой.";
+
+  const rows = (members ?? []).map((member: any) => ({
+    workspace_id: post.workspace_id,
+    user_id: member.user_id,
+    type: trigger,
+    title,
+    body,
+  }));
+  if (rows.length) {
+    const { error } = await admin.from("notifications").insert(rows);
+    if (error) throw error;
+  }
+}
+
 async function refreshPostStatus(admin: any, postId: string) {
   const { data: targets } = await admin.from("post_targets").select("status").eq("post_id", postId);
   const statuses = (targets ?? []).map((x: any) => x.status);
@@ -194,7 +236,11 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  for (const postId of affectedPosts) await refreshPostStatus(supabase, postId);
+  for (const postId of affectedPosts) {
+    await refreshPostStatus(supabase, postId);
+    const { data: post } = await supabase.from("posts").select("status").eq("id", postId).maybeSingle();
+    if (post?.status) await runScheduledAutomations(supabase, postId, post.status);
+  }
 
   return new Response(JSON.stringify({
     ok: true,
