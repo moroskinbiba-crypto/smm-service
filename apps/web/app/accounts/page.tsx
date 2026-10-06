@@ -167,7 +167,7 @@ export default function AccountsPage(){
           <div className="card-head"><h2>Подключённые аккаунты</h2><span>{accounts.length}</span></div>
           <div className="connected-list">
             {accounts.map(a=><div className="connected-account" key={a.id}>
-              <div className="connected-icon">{meta[a.platform as Platform]?.icon??'◎'}</div>
+              <div className={'connected-icon network-logo network-logo-'+a.platform}>{meta[a.platform as Platform]?.icon??'•'}</div>
               <div className="connected-main"><strong>{a.display_name||a.username||a.external_id}</strong><span>{meta[a.platform as Platform]?.name??a.platform} · {a.external_id}</span>{a.last_error&&<small className="error-text">{a.last_error}</small>}</div>
               <span className={a.status==='connected'?'account-status connected':'account-status error'}>{a.status==='connected'?'Работает':'Ошибка'}</span>
               <button className="secondary" onClick={()=>void check(a.id)}>Проверить</button>
@@ -179,7 +179,7 @@ export default function AccountsPage(){
 
         <section className="card connect-card">
           <div className="card-head"><h2>Добавить аккаунт</h2><span>секреты хранятся зашифрованно</span></div>
-          <div className="platform-tabs">{Object.entries(meta).map(([id,v])=><button key={id} className={platform===id?'platform-tab active':'platform-tab'} onClick={()=>setPlatform(id as Platform)}><b>{v.icon}</b>{v.name}</button>)}</div>
+          <div className="platform-tabs">{Object.entries(meta).map(([id,v])=><button key={id} className={platform===id?'platform-tab active':'platform-tab'} onClick={()=>setPlatform(id as Platform)}><b className={'network-logo network-logo-'+id}>{v.icon}</b>{v.name}</button>)}</div>
 
           {platform==='vk'&&<div className="oauth-panel">
             <div className="oauth-panel-title">Удобное подключение VK</div>
