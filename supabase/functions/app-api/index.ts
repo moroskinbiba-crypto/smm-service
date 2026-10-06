@@ -835,12 +835,6 @@ Deno.serve(async (req: Request) => {
         if (!targetUserId) throw new Error("Не указан пользователь");
         if (targetUserId === ctx.user.id) throw new Error("Нельзя приостановить собственный аккаунт");
 
-        const { data: targetAdmin } = await ctx.admin.from("platform_admins")
-          .select("user_id")
-          .eq("user_id", targetUserId)
-          .maybeSingle();
-        if (targetAdmin) throw new Error("Нельзя изменить статус другого администратора");
-
         const suspended = body.suspended === true;
         const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : null;
 
@@ -932,6 +926,32 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           return json({ ok: true, accounts: data ?? [] });
         }
+      case "telegram-notifications-start": {
+        const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+        const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
+        if (!token || !username) throw new Error("Служебный Telegram-бот ещё не настроен");
+        const code = randomToken(10);
+        const { error } = await ctx.admin.from("telegram_notification_requests").insert({
+          user_id: ctx.user.id,
+          workspace_id: ctx.workspace.workspace_id,
+          code,
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        });
+        if (error) throw error;
+        return json({
+          ok: true,
+          bot_username: username,
+          code,
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          start_url: `https://t.me/${username.replace(/^@/, "")}?start=notify_${code}`,
+        });
+      }
+      case "telegram-notifications-stop": {
+        await ctx.admin.from("telegram_notification_subscriptions")
+          .update({ enabled: false, updated_at: new Date().toISOString() })
+          .eq("user_id", ctx.user.id);
+        return json({ ok: true });
+      }
       case "telegram-service-status":
         {
           const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
@@ -2056,21 +2076,33 @@ Deno.serve(async (req: Request) => {
           });
 
           const byPlatform: Record<string, any> = {};
+          const byFormat: Record<string, any> = {};
           const daily: Record<string, any> = {};
 
           for (const t of scopedTargets) {
             byPlatform[t.platform] ||= { platform: t.platform, ...emptyMetrics() };
             const platform = byPlatform[t.platform];
 
-            if (t.status === "published") platform.published++;
+            if (t.status === "published") {
+              platform.published++;
+              f.published++;
+            }
             if (t.status === "failed") platform.failed++;
 
+            const format = String(t.publication_type || "feed");
+            const formatKey = t.platform + ":" + format;
+            byFormat[formatKey] ||= { platform: t.platform, format, published: 0, views: 0, likes: 0, comments: 0, reposts: 0 };
+            const f = byFormat[formatKey];
             const m = t.metrics ?? {};
             platform.views += Number(m.views ?? 0);
             platform.likes += Number(m.likes ?? 0);
             platform.comments += Number(m.comments ?? 0);
             platform.reposts += Number(m.reposts ?? 0);
             platform.clicks += Number(m.clicks ?? 0);
+            f.views += Number(m.views ?? 0);
+            f.likes += Number(m.likes ?? 0);
+            f.comments += Number(m.comments ?? 0);
+            f.reposts += Number(m.reposts ?? 0);
 
             if (t.status === "published" && t.published_at) {
               const day = String(t.published_at).slice(0, 10);
