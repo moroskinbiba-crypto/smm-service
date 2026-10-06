@@ -48,11 +48,11 @@ export async function appRequest<T = unknown>(action: string, payload: Record<st
 
 export async function uploadMedia(workspaceId: string, file: File) {
   const supabase = createClient();
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-    throw new Error('Поддерживаются только JPG, PNG и WebP');
+  if (!/^(image\/(jpeg|png|webp)|video\/(mp4|quicktime|webm|x-matroska))$/.test(file.type)) {
+    throw new Error('Поддерживаются JPG, PNG, WebP и видео MP4/MOV/WEBM/MKV');
   }
-  if (file.size > 50 * 1024 * 1024) {
-    throw new Error('Размер файла не должен превышать 50 МБ');
+  if (file.size > 250 * 1024 * 1024) {
+    throw new Error('Размер файла не должен превышать 250 МБ');
   }
   const safeName = file.name.replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, '_');
   const path = `${workspaceId}/${crypto.randomUUID()}-${safeName}`;
