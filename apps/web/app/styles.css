@@ -217,3 +217,7 @@
 .automation-row>div{display:grid;gap:4px;min-width:0}
 .automation-row span{font-size:11px;opacity:.55}
 @media(max-width:700px){.automation-form{grid-template-columns:1fr}.automation-row{grid-template-columns:1fr auto}.automation-row .danger-button{grid-column:1/-1;width:100%}}
+
+.calendar-view-week{grid-template-columns:repeat(7,1fr)}
+.calendar-view-day{grid-template-columns:1fr}
+.calendar-view-day .calendar-cell{min-height:520px}
