@@ -112,3 +112,21 @@ The app then shows the available professional Instagram accounts and lets the us
 - Instagram user ID when using Meta OAuth
 
 Those values are collected by the provider flow and stored by the backend.
+
+
+## Telegram-бот уведомлений TGRMLposting
+
+Это отдельный бот, не тот, который используется для подключения Telegram-каналов / Telegram Business.
+
+1. В @BotFather создай отдельного бота.
+2. Сохрани токен и username.
+3. Добавь в секреты Supabase:
+   - `TGRML_NOTIFY_BOT_TOKEN`
+   - `TGRML_NOTIFY_BOT_USERNAME`
+   - `TGRML_NOTIFY_WEBHOOK_SECRET`
+4. Webhook этого бота:
+   `https://lzogiorclfpmibqmzugg.supabase.co/functions/v1/telegram-notify-webhook`
+5. После настройки пользователь открывает в TGRMLposting раздел «Уведомления» → «Подключить уведомления в Telegram» → нажимает Start у бота.
+6. После подключения бот присылает:
+   - уведомление на каждом новом рубеже 1000 просмотров отдельно по каждой площадке;
+   - один общий отчёт по площадкам за сутки.
