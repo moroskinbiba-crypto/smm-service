@@ -50,20 +50,20 @@ begin
     end if;
 
     select count(*) into v_member_count
-    from public.workspace_members
-    where workspace_id = v_current_workspace_id;
+    from public.workspace_members wm2
+    where wm2.workspace_id = v_current_workspace_id;
 
     select count(*) into v_posts_count
-    from public.posts
-    where workspace_id = v_current_workspace_id;
+    from public.posts p2
+    where p2.workspace_id = v_current_workspace_id;
 
     select count(*) into v_social_accounts_count
-    from public.social_accounts
-    where workspace_id = v_current_workspace_id;
+    from public.social_accounts sa2
+    where sa2.workspace_id = v_current_workspace_id;
 
     select count(*) into v_invites_count
-    from public.workspace_invites
-    where workspace_id = v_current_workspace_id;
+    from public.workspace_invites wi2
+    where wi2.workspace_id = v_current_workspace_id;
 
     if v_current_role <> 'owner'
        or v_current_owner_id <> p_user_id
@@ -78,9 +78,9 @@ begin
     set workspace_id = null, updated_at = now()
     where id = p_user_id;
 
-    delete from public.workspace_members
-    where workspace_id = v_current_workspace_id
-      and user_id = p_user_id;
+    delete from public.workspace_members wm3
+    where wm3.workspace_id = v_current_workspace_id
+      and wm3.user_id = p_user_id;
   end if;
 
   select w.name, w.timezone
@@ -98,9 +98,9 @@ begin
     timezone = excluded.timezone,
     updated_at = now();
 
-  update public.workspace_invites
+  update public.workspace_invites wi4
   set used_at = now(), used_by = p_user_id
-  where token_hash = v_hash and used_at is null;
+  where wi4.token_hash = v_hash and wi4.used_at is null;
 
   return query
   select v_workspace_id, v_workspace_name, v_workspace_timezone, v_role;
