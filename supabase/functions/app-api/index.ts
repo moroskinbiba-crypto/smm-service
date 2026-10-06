@@ -899,6 +899,56 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true });
       case "publish-now":
         return json({ ok: true, ...(await publishPost(ctx, String(body.post_id))) });
+      case "content-insights":
+        {
+          const { data: posts, error: postsError } = await ctx.admin.from("posts")
+            .select("id,body,status,created_at,scheduled_at,post_targets(status,metrics,published_at)")
+            .eq("workspace_id", ctx.workspace.workspace_id)
+            .order("created_at", { ascending: false })
+            .limit(500);
+          if (postsError) throw postsError;
+
+          const stop = new Set([
+            "это","как","для","что","так","или","при","из","на","по","и","в","во","с","со","у","к","о","об","а","но","не","да","мы","вы","они","он","она","я","ты","за","до","от","же","ли","уже","еще","ещё","также","можно","если","будет","быть","был","была","были","их","его","ее","ее","тот","эта","этот","эти","все","всё","про","когда","где","кто","для","над","под","без","через"
+          ]);
+          const freq: Record<string,{term:string;count:number;views:number;posts:number}> = {};
+          const weekday: Record<number,{weekday:number;posts:number;views:number}> = {};
+
+          for (const post of posts ?? []) {
+            const text = String(post.body ?? "").toLowerCase().replace(/https?:\/\/\S+/g, " ").replace(/[^a-zа-яё0-9\s-]/gi, " ");
+            const words = text.split(/\s+/).map((word:string)=>word.replace(/^-+|-+$/g,"")).filter((word:string)=>word.length>=4&&!stop.has(word)&&!/^\d+$/.test(word));
+            const targets = Array.isArray(post.post_targets) ? post.post_targets : [];
+            const postViews = targets.reduce((sum:number,target:any)=>sum+Number(target.metrics?.views??0),0);
+            for (const word of new Set(words)) {
+              freq[word] ||= {term:word,count:0,views:0,posts:0};
+              freq[word].count++;
+              freq[word].views += postViews;
+              freq[word].posts++;
+            }
+            const publishedTarget = targets.find((target:any)=>target.status==="published" && target.published_at);
+            const dateValue = publishedTarget?.published_at || post.scheduled_at || post.created_at;
+            if (dateValue) {
+              const day = new Date(dateValue).getDay();
+              weekday[day] ||= {weekday:day,posts:0,views:0};
+              weekday[day].posts++;
+              weekday[day].views += postViews;
+            }
+          }
+
+          const weekdayNames = ["Воскресенье","Понедельник","Вторник","Среда","Четверг","Пятница","Суббота"];
+          const topics = Object.values(freq).sort((a:any,b:any)=>b.count-a.count).slice(0,30).map(item=>({
+            ...item,
+            avg_views: item.posts>0?Math.round(item.views/item.posts):0,
+          }));
+          const bestTopics = [...topics].sort((a:any,b:any)=>b.avg_views-a.avg_views).slice(0,10);
+          const weekdays = Object.values(weekday).sort((a:any,b:any)=>b.views/Math.max(1,b.posts)-a.views/Math.max(1,a.posts)).map(item=>({
+            label: weekdayNames[item.weekday],
+            posts:item.posts,
+            avg_views:item.posts?Math.round(item.views/item.posts):0,
+          }));
+
+          return json({ok:true,posts_analyzed:(posts??[]).length,topics,best_topics:bestTopics,weekdays});
+        }
       case "list-competitors":
         {
           const { data, error } = await ctx.admin.from("competitors")
