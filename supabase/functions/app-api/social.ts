@@ -1,8 +1,9 @@
 import md5 from "npm:md5@2.3.0";
 
-export type Platform = "telegram" | "vk" | "max" | "ok";
+export type Platform = "telegram" | "vk" | "max" | "ok" | "instagram";
 export type Secret = { access_token: string | null; refresh_token?: string | null; client_secret?: string | null };
 export type MediaItem = { path: string; name?: string; type?: string; size?: number; order?: number; signed_url?: string };
+export type PublicationType = "feed" | "reel" | "story";
 
 async function jsonResponse(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
@@ -39,10 +40,35 @@ export async function telegramHealth(secret: Secret, externalId?: string) {
   return { display_name: me.result?.first_name || me.result?.username || "Telegram Bot", username: me.result?.username ? `@${me.result.username}` : null };
 }
 
-export async function telegramPublish(secret: Secret, chatId: string, body: string, media: MediaItem[]) {
+export async function telegramPublish(secret: Secret, chatId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
   if (!secret.access_token) throw new Error("Telegram token не указан");
   if (!chatId) throw new Error("Не указан chat_id Telegram");
   const base = `https://api.telegram.org/bot${secret.access_token}`;
+
+  if (publicationType === "story") {
+    const businessConnectionId = typeof secret.client_secret === "string" ? secret.client_secret : "";
+    if (!businessConnectionId) {
+      throw new Error("Для Telegram Stories нужен Business connection ID подключённого Telegram Business аккаунта");
+    }
+    if (media.length !== 1) throw new Error("Telegram Story требует ровно один фото- или видеофайл");
+    const item = media[0];
+    if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
+    const content = item.type?.startsWith("video/")
+      ? { type: "video", video: item.signed_url }
+      : { type: "photo", photo: item.signed_url };
+    const result = await jsonResponse(`${base}/postStory`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        business_connection_id: businessConnectionId,
+        content,
+        active_period: 86400,
+        caption: body || undefined,
+      }),
+    });
+    return String(result.result?.id ?? Date.now());
+  }
+
   if (!media.length) {
     const result = await jsonResponse(`${base}/sendMessage`, {
       method: "POST",
@@ -51,21 +77,26 @@ export async function telegramPublish(secret: Secret, chatId: string, body: stri
     });
     return String(result.result?.message_id ?? result.result?.date ?? Date.now());
   }
-  if (media.length > 10) throw new Error("В одной публикации можно добавить не более 10 фото");
+
+  if (media.length > 10) throw new Error("В одной публикации можно добавить не более 10 медиафайлов");
+
   if (media.length === 1) {
     const item = media[0];
     if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
-    const result = await jsonResponse(`${base}/sendPhoto`, {
+    const isVideo = item.type?.startsWith("video/");
+    const result = await jsonResponse(`${base}/${isVideo ? "sendVideo" : "sendPhoto"}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, photo: item.signed_url, caption: body || undefined }),
+      body: JSON.stringify({ chat_id: chatId, [isVideo ? "video" : "photo"]: item.signed_url, caption: body || undefined }),
     });
     return String(result.result?.message_id ?? Date.now());
   }
+
   const items = media.map((item, index) => {
     if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
+    const isVideo = item.type?.startsWith("video/");
     return {
-      type: "photo",
+      type: isVideo ? "video" : "photo",
       media: item.signed_url,
       ...(index === 0 && body ? { caption: body } : {}),
     };
@@ -86,10 +117,32 @@ export async function maxHealth(secret: Secret, externalId?: string) {
   return { display_name: me.name || me.first_name || "MAX Bot", username: me.username ? `@${me.username}` : null, external_id: me.user_id ? String(me.user_id) : undefined };
 }
 
-export async function maxPublish(secret: Secret, chatId: string, body: string, media: MediaItem[]) {
+async function maxUploadAttachment(secret: Secret, item: MediaItem) {
+  if (!secret.access_token) throw new Error("MAX token не указан");
+  if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
+  const type = item.type?.startsWith("video/") ? "video" : "image";
+  const init = await jsonResponse(`https://platform-api2.max.ru/uploads?type=${type}`, {
+    method: "POST",
+    headers: { Authorization: secret.access_token },
+  });
+  if (!init.url) throw new Error("MAX не вернул URL загрузки");
+  const form = new FormData();
+  form.append("data", await fetchBlob(item.signed_url), item.name || (type === "video" ? "video.mp4" : "image.jpg"));
+  const upload = await uploadMultipart(init.url, form);
+  const token = upload?.token || init.token;
+  if (!token) throw new Error("MAX не вернул токен вложения");
+  return { type, payload: { token } };
+}
+
+export async function maxPublish(secret: Secret, chatId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
   if (!secret.access_token) throw new Error("MAX token не указан");
   if (!chatId) throw new Error("Не указан chat_id MAX");
-  const attachments = media.filter(m => m.signed_url).map(m => ({ type: "image", payload: { url: m.signed_url } }));
+  if (publicationType === "story") throw new Error("Stories в MAX API для чат-ботов сейчас не поддерживаются");
+  const attachments: any[] = [];
+  for (const item of media.slice(0, 10)) {
+    attachments.push(await maxUploadAttachment(secret, item));
+  }
+  if (attachments.length) await new Promise(resolve => setTimeout(resolve, 1200));
   const result = await jsonResponse(`https://platform-api2.max.ru/messages?chat_id=${encodeURIComponent(chatId)}`, {
     method: "POST",
     headers: { Authorization: secret.access_token, "content-type": "application/json" },
@@ -136,10 +189,14 @@ export async function vkHealth(secret: Secret, externalId?: string) {
   return { display_name: group?.name || (groupId ? `VK #${groupId}` : "VK"), username: group?.screen_name ? `@${group.screen_name}` : null };
 }
 
-export async function vkPublish(secret: Secret, ownerId: string, body: string, media: MediaItem[]) {
+export async function vkPublish(secret: Secret, ownerId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
   if (!secret.access_token) throw new Error("VK token не указан");
+  if (publicationType === "story") throw new Error("VK Stories пока не подключены в этом проекте");
   const cleanGroupId = ownerId.replace(/^-/, "");
-  const attachments = media.length ? await vkUploadImages(secret, cleanGroupId, media) : [];
+  const images = media.filter(m => !m.type?.startsWith("video/"));
+  const videos = media.filter(m => m.type?.startsWith("video/"));
+  if (videos.length) throw new Error("Видео для VK сначала нужно подключить через видео upload API; текущий релиз принимает видео в MAX, Telegram и Instagram");
+  const attachments = images.length ? await vkUploadImages(secret, cleanGroupId, images) : [];
   const params = new URLSearchParams({
     access_token: secret.access_token,
     v: "5.199",
@@ -149,6 +206,82 @@ export async function vkPublish(secret: Secret, ownerId: string, body: string, m
   if (attachments.length) params.set("attachments", attachments.join(","));
   const result = await jsonResponse(`https://api.vk.com/method/wall.post?${params.toString()}`);
   return String(result.response?.post_id ?? Date.now());
+}
+
+async function instagramGraph(path: string, init: RequestInit = {}) {
+  const version = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
+  const response = await fetch(`https://graph.facebook.com/${version}/${path}`, init);
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error?.message || data?.error?.error_user_msg || `Instagram API HTTP ${response.status}`);
+  }
+  return data;
+}
+
+export async function instagramHealth(secret: Secret, externalId?: string) {
+  if (!secret.access_token) throw new Error("Instagram token не указан");
+  const id = externalId || "me";
+  const fields = "id,username,name,profile_picture_url,followers_count,media_count,account_type";
+  const data = await instagramGraph(`${encodeURIComponent(id)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(secret.access_token)}`);
+  return { display_name: data.name || data.username || "Instagram", username: data.username ? `@${data.username}` : null, external_id: String(data.id || id), metadata_patch: { account_type: data.account_type ?? null } };
+}
+
+async function instagramCreateAndPublish(secret: Secret, igUserId: string, body: string, item: MediaItem, publicationType: PublicationType) {
+  if (!secret.access_token) throw new Error("Instagram token не указан");
+  if (!item.signed_url) throw new Error("Instagram требует доступный URL медиафайла");
+  const isVideo = item.type?.startsWith("video/");
+  const mediaParams = new URLSearchParams({
+    access_token: secret.access_token,
+    caption: body || "",
+  });
+
+  if (publicationType === "story") {
+    if (isVideo) {
+      mediaParams.set("video_url", item.signed_url);
+      mediaParams.set("media_type", "STORIES");
+    } else {
+      mediaParams.set("image_url", item.signed_url);
+      mediaParams.set("media_type", "STORIES");
+    }
+  } else if (isVideo) {
+    mediaParams.set("video_url", item.signed_url);
+    mediaParams.set("media_type", "REELS");
+  } else {
+    mediaParams.set("image_url", item.signed_url);
+  }
+
+  const container = await instagramGraph(`${encodeURIComponent(igUserId)}/media`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: mediaParams.toString(),
+  });
+  const creationId = container.id;
+  if (!creationId) throw new Error("Instagram не вернул creation_id");
+
+  if (isVideo) {
+    for (let attempt = 0; attempt < 18; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const status = await instagramGraph(`${encodeURIComponent(creationId)}?fields=status_code,status&access_token=${encodeURIComponent(secret.access_token)}`);
+      if (status.status_code === "FINISHED" || status.status === "FINISHED") break;
+      if (status.status_code === "ERROR" || status.status_code === "EXPIRED") throw new Error("Instagram не смог подготовить видео");
+    }
+  }
+
+  const published = await instagramGraph(`${encodeURIComponent(igUserId)}/media_publish`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `creation_id=${encodeURIComponent(creationId)}&access_token=${encodeURIComponent(secret.access_token)}`,
+  });
+  return String(published.id ?? creationId);
+}
+
+export async function instagramPublish(secret: Secret, igUserId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
+  if (!media.length) throw new Error("Instagram требует минимум одно изображение или видео");
+  if (publicationType === "story" && media.length !== 1) throw new Error("Instagram Story требует один файл");
+  if (media.length > 1) throw new Error("Instagram-карусель пока будет следующим этапом; публикуйте один файл");
+  return instagramCreateAndPublish(secret, igUserId, body, media[0], publicationType);
 }
 
 function okSignature(params: Record<string, string>, accessToken: string, appSecret: string) {
@@ -193,7 +326,8 @@ export async function okHealth(secret: Secret, metadata: Record<string, unknown>
   return { display_name: data.name || "Одноклассники", username: data.uid ? `id${data.uid}` : null, external_id: typeof metadata.group_id === "string" ? metadata.group_id : undefined };
 }
 
-export async function okPublish(secret: Secret, groupId: string, body: string, metadata: Record<string, unknown>, media: MediaItem[]) {
+export async function okPublish(secret: Secret, groupId: string, body: string, metadata: Record<string, unknown>, media: MediaItem[], publicationType: PublicationType = "feed") {
+  if (publicationType !== "feed") throw new Error("ОК сейчас поддерживает публикации только в ленту");
   const accessToken = secret.access_token;
   const appKey = typeof metadata.application_key === "string" ? metadata.application_key : "";
   const appSecret = secret.client_secret || "";
@@ -264,12 +398,13 @@ export async function healthcheck(platform: Platform, secret: Secret, externalId
   }
 }
 
-export async function publish(platform: Platform, secret: Secret, externalId: string, body: string, media: MediaItem[], metadata: Record<string, unknown>) {
+export async function publish(platform: Platform, secret: Secret, externalId: string, body: string, media: MediaItem[], metadata: Record<string, unknown>, publicationType: PublicationType = "feed") {
   switch (platform) {
-    case "telegram": return telegramPublish(secret, externalId, body, media);
-    case "vk": return vkPublish(secret, externalId, body, media);
-    case "max": return maxPublish(secret, externalId, body, media);
-    case "ok": return okPublish(secret, externalId, body, metadata, media);
+    case "telegram": return telegramPublish(secret, externalId, body, media, publicationType);
+    case "vk": return vkPublish(secret, externalId, body, media, publicationType);
+    case "max": return maxPublish(secret, externalId, body, media, publicationType);
+    case "ok": return okPublish(secret, externalId, body, metadata, media, publicationType);
+    case "instagram": return instagramPublish(secret, externalId, body, media, publicationType);
   }
 }
 
