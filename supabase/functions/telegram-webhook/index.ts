@@ -136,9 +136,8 @@ async function registerBusinessUser(admin: any, update: any, code: string, token
 
   await tg(token, "sendMessage", {
     chat_id: update.message.chat.id,
-    text: "✅ Пользователь Telegram найден.
-
-Теперь откройте Telegram → Настройки → Telegram Business → Чат-боты и подключите @" +
+    text: "✅ Пользователь Telegram найден.\\n\\n" +
+      "Теперь откройте Telegram → Настройки → Telegram Business → Чат-боты и подключите @" +
       botUsername.replace(/^@/, "") + ". Разрешите этому боту управление историями (Stories). После подключения сервис автоматически получит доступ и добавит аккаунт.",
   }).catch(() => undefined);
 
