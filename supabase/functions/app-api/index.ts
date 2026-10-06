@@ -150,9 +150,9 @@ async function loadPosts(ctx: any, body: any) {
   const { data, error } = await ctx.admin.from("posts")
     .select("id,body,media,status,scheduled_at,created_at,updated_at,workspace_id,post_targets(id,social_account_id,platform,status,last_error,published_at,metrics,external_post_id,social_accounts(display_name,username,status))")
     .eq("workspace_id", ctx.workspace.workspace_id)
-    .gte("scheduled_at", from)
-    .lte("scheduled_at", to)
-    .order("scheduled_at", { ascending: true });
+    .order("scheduled_at", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(500);
   if (error) throw error;
 
   const posts = await Promise.all((data ?? []).map(async (post: any) => ({
