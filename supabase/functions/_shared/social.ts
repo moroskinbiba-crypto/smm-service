@@ -204,6 +204,42 @@ export async function okPublish(secret: Secret, groupId: string, body: string, m
   return String(data);
 }
 
+
+export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string) {
+  if (!externalPostId) return {};
+  if (platform === "vk") {
+    if (!secret.access_token) throw new Error("VK token не указан");
+    const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+    const params = new URLSearchParams({
+      access_token: secret.access_token,
+      v: "5.199",
+      posts: ownerId + "_" + externalPostId,
+    });
+    const data = await jsonResponse("https://api.vk.com/method/wall.getById?" + params.toString());
+    const post = data.response?.[0];
+    return {
+      views: Number(post?.views?.count ?? 0),
+      likes: Number(post?.likes?.count ?? 0),
+      comments: Number(post?.comments?.count ?? 0),
+      reposts: Number(post?.reposts?.count ?? 0),
+    };
+  }
+  if (platform === "max") {
+    if (!secret.access_token) throw new Error("MAX token не указан");
+    const data = await jsonResponse("https://platform-api2.max.ru/messages/" + encodeURIComponent(externalPostId), {
+      headers: { Authorization: secret.access_token },
+    });
+    const stat = data.stat ?? {};
+    return {
+      views: Number(stat.views ?? stat.view_count ?? 0),
+      likes: Number(stat.likes ?? stat.reactions?.likes ?? 0),
+      comments: Number(stat.comments ?? stat.comments_count ?? 0),
+      reposts: Number(stat.reposts ?? stat.repost_count ?? 0),
+    };
+  }
+  return {};
+}
+
 export async function healthcheck(platform: Platform, secret: Secret, externalId: string, metadata: Record<string, unknown>) {
   switch (platform) {
     case "telegram": return telegramHealth(secret, externalId);
