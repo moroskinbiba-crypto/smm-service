@@ -118,7 +118,7 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
     </section>
     <aside className="editor-aside"><div className="editor-block"><h3>Площадки</h3><div className="account-select-list">{accounts.map(a=><div key={a.id} className={selected.includes(a.id)?'account-target-row selected':'account-target-row'}>
   <button onClick={()=>a.status==='connected'&&setSelected(v=>v.includes(a.id)?v.filter(x=>x!==a.id):[...v,a.id])} className="account-select" disabled={a.status!=='connected'}>
-    <span className="network-icon">{meta[a.platform]?.icon??'◎'}</span><span><strong>{a.display_name||a.username||a.external_id}</strong><small>{meta[a.platform]?.name??a.platform}</small></span><span className={a.status==='connected'?'account-state ok':'account-state'}>{a.status==='connected'?'✓':'!'}</span>
+    <span className={'network-icon network-logo network-logo-'+a.platform}>{meta[a.platform]?.icon??'•'}</span><span><strong>{a.display_name||a.username||a.external_id}</strong><small>{meta[a.platform]?.name??a.platform}</small></span><span className={a.status==='connected'?'account-state ok':'account-state'}>{a.status==='connected'?'✓':'!'}</span>
   </button>
   {selected.includes(a.id)&&<select className="publication-type-select" value={publicationTypes[a.id]||'feed'} onChange={e=>setPublicationTypes(v=>({...v,[a.id]:e.target.value as any}))}>
     <option value="feed">Пост</option>
