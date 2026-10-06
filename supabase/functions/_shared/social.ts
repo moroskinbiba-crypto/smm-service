@@ -51,18 +51,32 @@ export async function telegramPublish(secret: Secret, chatId: string, body: stri
     });
     return String(result.result?.message_id ?? result.result?.date ?? Date.now());
   }
-  let firstId: string | null = null;
-  for (let i = 0; i < media.length; i++) {
-    const item = media[i];
+  if (media.length > 10) throw new Error("В одной публикации можно добавить не более 10 фото");
+  if (media.length === 1) {
+    const item = media[0];
     if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
     const result = await jsonResponse(`${base}/sendPhoto`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, photo: item.signed_url, caption: i === 0 ? body : undefined }),
+      body: JSON.stringify({ chat_id: chatId, photo: item.signed_url, caption: body || undefined }),
     });
-    if (!firstId) firstId = String(result.result?.message_id ?? Date.now());
+    return String(result.result?.message_id ?? Date.now());
   }
-  return firstId ?? String(Date.now());
+  const items = media.map((item, index) => {
+    if (!item.signed_url) throw new Error("У медиафайла отсутствует ссылка");
+    return {
+      type: "photo",
+      media: item.signed_url,
+      ...(index === 0 && body ? { caption: body } : {}),
+    };
+  });
+  const result = await jsonResponse(`${base}/sendMediaGroup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, media: items }),
+  });
+  const first = Array.isArray(result.result) ? result.result[0] : null;
+  return String(first?.message_id ?? Date.now());
 }
 
 export async function maxHealth(secret: Secret, externalId?: string) {
