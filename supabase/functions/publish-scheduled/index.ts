@@ -41,7 +41,7 @@ async function processRecurrences(admin: any) {
     }
 
     const { data: source, error: sourceError } = await admin.from("posts")
-      .select("id,body,media,post_targets(social_account_id,platform)")
+      .select("id,user_id,body,media,post_targets(social_account_id,platform)")
       .eq("id", recurrence.source_post_id)
       .eq("workspace_id", recurrence.workspace_id)
       .maybeSingle();
@@ -54,7 +54,7 @@ async function processRecurrences(admin: any) {
     const scheduledAt = new Date(recurrence.next_run_at).toISOString();
     const { data: cloned, error: cloneError } = await admin.from("posts").insert({
       workspace_id: recurrence.workspace_id,
-      user_id: null,
+      user_id: source.user_id,
       body: source.body ?? "",
       media: source.media ?? [],
       status: "scheduled",
