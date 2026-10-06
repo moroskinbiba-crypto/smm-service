@@ -42,6 +42,9 @@ type AdminTeam = {
   owner_id: string;
   owner_email: string | null;
   timezone: string;
+  workspace_kind?: 'personal'|'team';
+  max_members?: number;
+  member_count?: number;
   created_at: string;
   members: AdminMember[];
   accounts: AdminAccount[];
@@ -106,6 +109,7 @@ export default function AdminPage() {
   const [filter, setFilter] = useState('');
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
   const [scheduler, setScheduler] = useState<SchedulerHealth | null>(null);
+  const [limitBusy, setLimitBusy] = useState('');
 
   async function load() {
     setMessage('');
@@ -120,6 +124,25 @@ export default function AdminPage() {
   useEffect(() => {
     void load().catch(error => setMessage(error instanceof Error ? error.message : 'Не удалось загрузить админ-панель'));
   }, []);
+
+  async function setTeamLimit(team: AdminTeam) {
+    const raw = window.prompt('Максимум участников для команды', String(team.max_members ?? 10));
+    if (raw === null) return;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 10000) {
+      setMessage('Введите целое число от 1 до 10000');
+      return;
+    }
+    setLimitBusy(team.id); setMessage('');
+    try {
+      await appRequest('admin-set-workspace-limit', { workspace_id: team.id, max_members: value });
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не удалось изменить лимит команды');
+    } finally {
+      setLimitBusy('');
+    }
+  }
 
   async function setSuspended(user: AdminUser, suspended: boolean) {
     const action = suspended ? 'приостановить' : 'возобновить';
@@ -248,8 +271,16 @@ export default function AdminPage() {
                   <div>
                     <h2>{team.name}</h2>
                     <div className="admin-team-meta">
-                      Владелец: {team.owner_email ?? '—'} · {team.members.length} участников · {team.accounts.length} соц. аккаунтов · {team.timezone}
+                      {team.workspace_kind === 'personal' ? 'Личный профиль' : 'Команда'} · Владелец: {team.owner_email ?? '—'} · {team.members.length} / {team.max_members ?? '—'} участников · {team.accounts.length} соц. аккаунтов · {team.timezone}
                     </div>
+                    {team.workspace_kind === 'team' && (
+                      <div className="workspace-limit-row">
+                        <small>Лимит участников</small>
+                        <button className="secondary" disabled={limitBusy === team.id} onClick={() => void setTeamLimit(team)}>
+                          {limitBusy === team.id ? 'Сохраняем…' : 'Изменить: ' + (team.max_members ?? 10)}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button className="secondary" onClick={() => toggleTeam(team.id)}>{expanded ? 'Свернуть' : 'Развернуть'}</button>
                 </div>
