@@ -105,6 +105,7 @@ async function requireTargets(admin: any, workspaceId: string, ids: string[]) {
 
 function validateMedia(media: unknown) {
   const items = Array.isArray(media) ? media : [];
+  if (items.length > 10) throw new Error("В одной публикации можно добавить не более 10 фото");
   for (const item of items) {
     const type = typeof item?.type === "string" ? item.type : "";
     const size = typeof item?.size === "number" ? item.size : 0;
