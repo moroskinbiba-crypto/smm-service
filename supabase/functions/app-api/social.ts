@@ -65,9 +65,10 @@ export async function telegramPublish(secret: Secret, chatId: string, body: stri
   return firstId ?? String(Date.now());
 }
 
-export async function maxHealth(secret: Secret) {
+export async function maxHealth(secret: Secret, externalId?: string) {
   if (!secret.access_token) throw new Error("MAX token не указан");
   const me = await jsonResponse("https://platform-api2.max.ru/me", { headers: { Authorization: secret.access_token } });
+  if (externalId) await jsonResponse("https://platform-api2.max.ru/chats/" + encodeURIComponent(externalId), { headers: { Authorization: secret.access_token } });
   return { display_name: me.name || me.first_name || "MAX Bot", username: me.username ? `@${me.username}` : null, external_id: me.user_id ? String(me.user_id) : undefined };
 }
 
@@ -244,7 +245,7 @@ export async function healthcheck(platform: Platform, secret: Secret, externalId
   switch (platform) {
     case "telegram": return telegramHealth(secret, externalId);
     case "vk": return vkHealth(secret, externalId);
-    case "max": return maxHealth(secret);
+    case "max": return maxHealth(secret, externalId);
     case "ok": return okHealth(secret, metadata);
   }
 }
