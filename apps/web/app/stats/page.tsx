@@ -58,6 +58,7 @@ const platformNames: Record<string, string> = {
   vk: 'VK',
   max: 'MAX',
   ok: 'Одноклассники',
+  instagram: 'Instagram',
 };
 
 function number(value: number) {
