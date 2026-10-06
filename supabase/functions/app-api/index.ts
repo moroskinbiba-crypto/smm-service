@@ -1346,11 +1346,13 @@ Deno.serve(async (req: Request) => {
             });
             const secret = await getSecret(ctx.admin, account.id);
             const checked = await healthcheck(platform as Platform, secret ?? {}, externalId, metadata);
+            const nextMetadata = checked?.metadata_patch ? { ...metadata, ...checked.metadata_patch } : metadata;
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
               last_error: null,
               display_name: body.display_name || checked.display_name || null,
               username: body.username || checked.username || null,
+              metadata: nextMetadata,
               updated_at: new Date().toISOString(),
             }).eq("id", account.id).select("*").single();
             if (updateError) throw updateError;
@@ -1366,11 +1368,13 @@ Deno.serve(async (req: Request) => {
           const account = await accountRow(ctx.admin, body.account_id, ctx.workspace.workspace_id);
           const secret = await getSecret(ctx.admin, account.id);
           const checked = await healthcheck(account.platform as Platform, secret ?? {}, account.external_id ?? "", account.metadata ?? {});
+          const nextMetadata = checked?.metadata_patch ? { ...(account.metadata ?? {}), ...checked.metadata_patch } : (account.metadata ?? {});
           const { data, error } = await ctx.admin.from("social_accounts").update({
             status: "connected",
             last_error: null,
             display_name: account.display_name || checked.display_name || null,
             username: account.username || checked.username || null,
+            metadata: nextMetadata,
             updated_at: new Date().toISOString(),
           }).eq("id", account.id).select("id,platform,external_id,display_name,username,token_expires_at,status,last_error,metadata,created_at,updated_at").single();
           if (error) throw error;
