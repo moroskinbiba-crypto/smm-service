@@ -24,9 +24,39 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
   const [media,setMedia]=useState(post?.media??[]);
   const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(''); const [showEmoji,setShowEmoji]=useState(false);
   const [showAI,setShowAI]=useState(false); const [aiMode,setAiMode]=useState('improve'); const [aiBusy,setAiBusy]=useState(false);
+  const [showUTM,setShowUTM]=useState(false); const [utmSource,setUtmSource]=useState(''); const [utmMedium,setUtmMedium]=useState('social'); const [utmCampaign,setUtmCampaign]=useState(''); const [utmContent,setUtmContent]=useState('');
   async function files(fs:FileList|File[]){setBusy(true);setMsg('');try{const incoming=Array.from(fs);if(media.length+incoming.length>10)throw new Error('В одной публикации можно добавить не более 10 фото');const next: Awaited<ReturnType<typeof uploadMedia>>[]=[];for(const f of incoming)next.push(await uploadMedia(workspaceId,f));setMedia(v=>[...v,...next]);}catch(e){setMsg(e instanceof Error?e.message:'Не удалось загрузить файл')}finally{setBusy(false)}}
   function wrap(a:string,b=a){const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;setText(text.slice(0,s)+a+text.slice(s,e)+b+text.slice(e));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(s+a.length,e+a.length)})}
   async function save(kind:'draft'|'schedule'|'publish'){if(!selected.length){setMsg('Выберите хотя бы один аккаунт.');return}if(!text.trim()&&!media.length){setMsg('Добавьте текст или медиафайл.');return}setBusy(true);setMsg('');try{const x=await appRequest<{post_id:string}>('save-post',{post_id:post?.id,text,media,scheduled_at:kind==='draft'?null:new Date(date+'T'+time).toISOString(),target_account_ids:selected});if(kind==='publish'){const result=await appRequest<{status:string;results?:Array<{ok:boolean;error?:string}>}>('publish-now',{post_id:x.post_id});if(result.status!=='published'){await onSaved();const errors=(result.results??[]).filter(r=>!r.ok).map(r=>r.error).filter(Boolean);setMsg('Публикация завершена со статусом «'+label(result.status)+'». '+(errors.length?errors.join(' · '):'Проверьте статусы площадок.'));return;}}await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось сохранить')}finally{setBusy(false)}}
+  function applyUTM(){
+    const el=document.querySelector<HTMLTextAreaElement>('#post-text');
+    const source=el?.value??text;
+    let url='';
+    let start=0;
+    let end=0;
+    if(el){
+      start=el.selectionStart;end=el.selectionEnd;
+      const selectedText=source.slice(start,end).trim();
+      if(selectedText) url=selectedText;
+    }
+    if(!url) url=window.prompt('URL для UTM','https://');
+    if(!url)return;
+    try{
+      const u=new URL(url);
+      if(utmSource)u.searchParams.set('utm_source',utmSource);
+      if(utmMedium)u.searchParams.set('utm_medium',utmMedium);
+      if(utmCampaign)u.searchParams.set('utm_campaign',utmCampaign);
+      if(utmContent)u.searchParams.set('utm_content',utmContent);
+      const next=u.toString();
+      if(el&&start!==end){
+        setText(source.slice(0,start)+next+source.slice(end));
+      }else{
+        setText(v=>v+(v.trim()?'\n':'')+next);
+      }
+      setShowUTM(false);
+    }catch{setMsg('Введите корректный URL')}
+  }
+
   async function runAI(){
     const source=text.trim();
     if(!source){setMsg('Добавьте текст, чтобы AI мог его обработать.');return;}
@@ -55,8 +85,8 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="post-editor-modal" onMouseDown={e=>e.stopPropagation()}>
     <div className="modal-head"><div><div className="eyebrow">РЕДАКТОР ПУБЛИКАЦИИ</div><h2>{post?'Изменить публикацию':'Новая публикация'}</h2></div><button className="icon-button" onClick={onClose}>×</button></div>
     <div className="editor-grid"><section>
-      <div className="editor-toolbar"><button onClick={()=>wrap('**')}>B</button><button onClick={()=>wrap('*')}>I</button><button onClick={()=>wrap(String.fromCharCode(96))}>&lt;&gt;</button><button onClick={()=>{const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;const url=window.prompt('Ссылка', 'https://');if(!url)return;setText(text.slice(0,s)+'['+text.slice(s,e)+']('+url+')'+text.slice(e))}}>🔗</button><button onClick={()=>setShowEmoji(v=>!v)}>😊</button><button className="ai-toolbar-button" onClick={()=>setShowAI(v=>!v)}>✨ AI</button></div>
-      {showAI&&<div className="ai-popover"><strong>AI-помощник</strong><select value={aiMode} onChange={e=>setAiMode(e.target.value)}><option value="improve">Улучшить текст</option><option value="shorten">Сократить</option><option value="sales">Сделать продающим</option><option value="headline">5 вариантов заголовка</option><option value="variants">3 варианта поста</option><option value="adapt">Адаптировать под площадку</option></select><button className="primary" disabled={aiBusy} onClick={()=>void runAI()}>{aiBusy?'Генерируем…':'Применить AI'}</button></div>}{showEmoji&&<div className="emoji-popover">{emojis.map(x=><button key={x} onClick={()=>{setText(v=>v+x);setShowEmoji(false)}}>{x}</button>)}</div>}
+      <div className="editor-toolbar"><button onClick={()=>wrap('**')}>B</button><button onClick={()=>wrap('*')}>I</button><button onClick={()=>wrap(String.fromCharCode(96))}>&lt;&gt;</button><button onClick={()=>{const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;const url=window.prompt('Ссылка', 'https://');if(!url)return;setText(text.slice(0,s)+'['+text.slice(s,e)+']('+url+')'+text.slice(e))}}>🔗</button><button onClick={()=>setShowEmoji(v=>!v)}>😊</button><button className="ai-toolbar-button" onClick={()=>setShowAI(v=>!v)}>✨ AI</button><button onClick={()=>setShowUTM(v=>!v)}>UTM</button></div>
+      {showUTM&&<div className="ai-popover utm-popover"><strong>UTM-метки</strong><input value={utmSource} onChange={e=>setUtmSource(e.target.value)} placeholder="utm_source"/><input value={utmMedium} onChange={e=>setUtmMedium(e.target.value)} placeholder="utm_medium"/><input value={utmCampaign} onChange={e=>setUtmCampaign(e.target.value)} placeholder="utm_campaign"/><input value={utmContent} onChange={e=>setUtmContent(e.target.value)} placeholder="utm_content"/><button className="primary" onClick={applyUTM}>Добавить метки</button></div>}{showAI&&<div className="ai-popover"><strong>AI-помощник</strong><select value={aiMode} onChange={e=>setAiMode(e.target.value)}><option value="improve">Улучшить текст</option><option value="shorten">Сократить</option><option value="sales">Сделать продающим</option><option value="headline">5 вариантов заголовка</option><option value="variants">3 варианта поста</option><option value="adapt">Адаптировать под площадку</option></select><button className="primary" disabled={aiBusy} onClick={()=>void runAI()}>{aiBusy?'Генерируем…':'Применить AI'}</button></div>}{showEmoji&&<div className="emoji-popover">{emojis.map(x=><button key={x} onClick={()=>{setText(v=>v+x);setShowEmoji(false)}}>{x}</button>)}</div>}
       <textarea id="post-text" className="post-editor-textarea" value={text} onChange={e=>setText(e.target.value)} placeholder="Текст публикации…" />
       <div className="upload-area" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void files(e.dataTransfer.files)}}><input id="post-file" hidden type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e=>{if(e.target.files)void files(e.target.files)}}/><label htmlFor="post-file"><strong>Добавить фото</strong><span>или перетащите сюда файлы</span></label></div>
       {!!media.length&&<div className="media-list">{media.map((m,i)=><div className="media-item" key={m.path} draggable onDragStart={e=>e.dataTransfer.setData('text/plain',String(i))} onDragOver={e=>e.preventDefault()} onDrop={e=>{const from=Number(e.dataTransfer.getData('text/plain'));if(Number.isNaN(from)||from===i)return;const n=[...media];const [x]=n.splice(from,1);n.splice(i,0,x);setMedia(n.map((q,j)=>({...q,order:j})))}}><div className="media-thumb">{m.signed_url?<img src={m.signed_url} alt=""/>:m.type?.startsWith('video')?'🎬':'🖼️'}</div><div className="media-info"><strong>{m.name}</strong><span>Перетащите или используйте стрелки для изменения порядка</span></div><div className="media-actions"><button className="secondary" disabled={i===0} onClick={()=>{if(i===0)return;const n=[...media];[n[i-1],n[i]]=[n[i],n[i-1]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↑</button><button className="secondary" disabled={i===media.length-1} onClick={()=>{if(i>=media.length-1)return;const n=[...media];[n[i],n[i+1]]=[n[i+1],n[i]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↓</button><button className="secondary" onClick={()=>setMedia(v=>v.filter((_,j)=>j!==i))}>Удалить</button></div></div>)}</div>}
