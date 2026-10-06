@@ -124,7 +124,7 @@ Those values are collected by the provider flow and stored by the backend.
    - `TGRML_NOTIFY_BOT_TOKEN`
    - `TGRML_NOTIFY_BOT_USERNAME`
    - `TGRML_NOTIFY_WEBHOOK_SECRET`
-4. Webhook этого бота:
+4. Webhook автоматически зарегистрируется кнопкой подключения в TGRMLposting; URL webhook:
    `https://lzogiorclfpmibqmzugg.supabase.co/functions/v1/telegram-notify-webhook`
 5. После настройки пользователь открывает в TGRMLposting раздел «Уведомления» → «Подключить уведомления в Telegram» → нажимает Start у бота.
 6. После подключения бот присылает:
