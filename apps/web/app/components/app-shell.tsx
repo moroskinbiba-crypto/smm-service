@@ -8,7 +8,7 @@ import { appRequest } from '../../lib/app-api';
 
 type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string };
 
-export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'recurrences' | 'competitors' | 'content' | 'admin'; children: ReactNode }) {
+export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'recurrences' | 'competitors' | 'content' | 'notifications' | 'admin'; children: ReactNode }) {
   const supabase = createClient();
   const [theme, setTheme] = useState<'light'|'dark'>('light');
   const [workspace, setWorkspace] = useState<Workspace|null>(null);
@@ -66,6 +66,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <Link className={active==='recurrences'?'nav-link active':'nav-link'} href="/recurrences">Повторы</Link>
         <Link className={active==='competitors'?'nav-link active':'nav-link'} href="/competitors">Конкуренты</Link>
         <Link className={active==='content'?'nav-link active':'nav-link'} href="/content">Контент</Link>
+        <Link className={active==='notifications'?'nav-link active':'nav-link'} href="/notifications">Уведомления</Link>
         {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Админ</Link>}
       </nav>
       <div className="top-actions"><Link className="workspace-chip" href="/team"><span className="workspace-dot"/>{workspace?.workspace_name??'Команда'}</Link><button className="theme" onClick={()=>{const next=theme==='light'?'dark':'light';setTheme(next);window.localStorage.setItem('smm-theme',next)}}>{theme==='light'?'☾':'☀'} Тема</button><button className="profile-button" onClick={signOut}>Выйти</button></div>
