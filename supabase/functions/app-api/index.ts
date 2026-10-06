@@ -2028,7 +2028,7 @@ Deno.serve(async (req: Request) => {
             try {
               const account = target.social_accounts;
               const secret = await getSecret(ctx.admin, account.id);
-              const metrics = await fetchMetrics(account.platform as Platform, secret ?? {}, account.external_id ?? "", target.external_post_id);
+              const metrics = await fetchMetrics(account.platform as Platform, secret ?? {}, account.external_id ?? "", target.external_post_id, target.publication_type || "feed");
               if (Object.keys(metrics).length) {
                 const { error } = await ctx.admin.from("post_targets").update({
                   metrics,
