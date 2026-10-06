@@ -14,6 +14,26 @@ const label=(s:string)=>({draft:'Черновик',scheduled:'Запланиро
 function range(d:Date){return {from:new Date(d.getFullYear(),d.getMonth()-1,1).toISOString(),to:new Date(d.getFullYear(),d.getMonth()+2,0,23,59,59).toISOString()};}
 function preview(p:ApiPost){const x=p.body.replace(/\s+/g,' ').trim();return x.length>20?x.slice(0,20)+'…':x||'Без текста';}
 
+function parseCsv(input:string){
+  const rows:string[][]=[]; let row:string[]=[]; let cell=''; let quoted=false;
+  for(let i=0;i<input.length;i++){
+    const ch=input[i];
+    const next=input[i+1];
+    if(ch==='"' && quoted && next==='"'){cell+='"';i++;continue}
+    if(ch==='"'){quoted=!quoted;continue}
+    if(!quoted && ch===','){row.push(cell);cell='';continue}
+    if(!quoted && (ch==='\n'||ch==='\r')){
+      if(ch==='\r'&&next==='\n')i++;
+      row.push(cell);cell='';
+      if(row.some(value=>value.trim()!==''))rows.push(row);
+      row=[];continue;
+    }
+    cell+=ch;
+  }
+  if(cell!==''||row.length){row.push(cell);if(row.some(value=>value.trim()!==''))rows.push(row)}
+  return rows;
+}
+
 function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:string;workspaceRole:string;onClose:()=>void;onSaved:()=>Promise<void>}){
   const {post,accounts,workspaceId,workspaceRole,onClose,onSaved}=props;
   const base=post?.scheduled_at?new Date(post.scheduled_at):new Date(Date.now()+3600000);
@@ -99,7 +119,7 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];workspaceId:st
 }
 
 export default function Home(){
-  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
+  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
   async function load(){const [a,p]=await Promise.all([appRequest<{accounts:SocialAccount[]}>('list-accounts'),appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string}}>('list-posts',range(cursor))]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setAccounts(a.accounts??[]);setPosts(p.posts??[])}
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
   const days=useMemo(()=>{if(view==='month'){const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))}const f=new Date(cursor);const monday=new Date(f);monday.setDate(f.getDate()-((f.getDay()+6)%7));if(view==='week')return Array.from({length:7},(_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i));return [new Date(cursor)]},[cursor,view]);
@@ -122,6 +142,31 @@ export default function Home(){
       await load();
     }catch(e){setMsg(e instanceof Error?e.message:'Массовая операция не выполнена')}finally{setBulkBusy(false)}
   }
+  async function importCsv(file:File){
+    setImportBusy(true);setMsg('');
+    try{
+      const text=await file.text();
+      const rows=parseCsv(text);
+      if(rows.length<2)throw new Error('CSV должен содержать заголовок и хотя бы одну строку');
+      const headers=rows[0].map(h=>h.trim().toLowerCase());
+      const indexOf=(name:string)=>headers.indexOf(name);
+      const textIndex=indexOf('text');
+      if(textIndex<0)throw new Error('В CSV обязателен столбец text');
+      const dateIndex=indexOf('date');
+      const timeIndex=indexOf('time');
+      const platformsIndex=indexOf('platforms');
+      const payload=rows.slice(1).map(row=>({
+        text:row[textIndex]??'',
+        date:dateIndex>=0?row[dateIndex]??'':'',
+        time:timeIndex>=0?row[timeIndex]??'':'',
+        platforms:platformsIndex>=0?row[platformsIndex]??'':'all',
+      }));
+      const result=await appRequest<{created:string[];errors:string[]}>('import-posts',{rows:payload});
+      setMsg('Импортировано: '+result.created.length+(result.errors?.length?' · ошибок: '+result.errors.length:''));
+      await load();
+    }catch(e){setMsg(e instanceof Error?e.message:'Не удалось импортировать CSV')}finally{setImportBusy(false)}
+  }
+
   async function remove(id:string){try{await appRequest('delete-post',{post_id:id});await load()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось удалить')}}
   function startDrag(postId:string,e:React.DragEvent){e.dataTransfer.setData('text/plain',postId);e.dataTransfer.effectAllowed='move'}
   async function dropOnDay(day:Date,e:React.DragEvent){
@@ -134,7 +179,7 @@ export default function Home(){
     if(next.getTime()<=Date.now()){setMsg('Нельзя перенести публикацию в прошлое.');return}
     try{await appRequest('reschedule-post',{post_id:post.id,scheduled_at:next.toISOString()});await load()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось перенести публикацию')}
   }
-  return <AppShell active="plan"><section className="page-section"><div className="page-heading"><div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Календарь, редактор, медиа и планирование публикаций.</p></div><button className="plus-button" onClick={()=>setEditor(null)}>＋</button></div>
+  return <AppShell active="plan"><section className="page-section"><div className="page-heading"><div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Календарь, редактор, медиа и планирование публикаций.</p></div><div className="plan-heading-actions"><input id="csv-import" type="file" accept=".csv,text/csv" hidden onChange={e=>{const file=e.target.files?.[0];if(file)void importCsv(file);e.currentTarget.value=''}}/><label className="secondary" htmlFor="csv-import">{importBusy?'Импортируем…':'Импорт CSV'}</label><button className="plus-button" onClick={()=>setEditor(null)}>＋</button></div></div>
     <section className="card calendar-preview"><div className="calendar-toolbar"><div className="calendar-nav"><button className="secondary" onClick={()=>setCursor(view==='day'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()-1):view==='week'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()-7):new Date(cursor.getFullYear(),cursor.getMonth()-1,1))}>←</button><strong>{view==='day'?cursor.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}):cursor.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</strong><button className="secondary" onClick={()=>setCursor(view==='day'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1):view==='week'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+7):new Date(cursor.getFullYear(),cursor.getMonth()+1,1))}>→</button><button className="secondary" onClick={()=>setCursor(new Date())}>Сегодня</button><button className={view==='month'?'secondary active-period':'secondary'} onClick={()=>setView('month')}>Месяц</button><button className={view==='week'?'secondary active-period':'secondary'} onClick={()=>setView('week')}>Неделя</button><button className={view==='day'?'secondary active-period':'secondary'} onClick={()=>setView('day')}>День</button></div><span>{posts.length} публикаций</span></div>
       <div className={"calendar-grid calendar-view-"+view}>{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><div className="calendar-weekday" key={d}>{d}</div>)}{days.map(d=>{const k=d.toISOString().slice(0,10);const ev=byDay.get(k)??[];return <div key={k} className={(view==='month'&&d.getMonth()!==cursor.getMonth())?'calendar-cell muted-day':'calendar-cell'} onDragOver={e=>e.preventDefault()} onDrop={e=>void dropOnDay(d,e)}><span>{d.getDate()}</span>{ev.slice(0,3).map(p=><button key={p.id} draggable onDragStart={e=>startDrag(p.id,e)} className={'calendar-post status-'+p.status} onClick={()=>setEditor(p)}>{p.media[0]?.signed_url&&<img src={p.media[0].signed_url} alt=""/>}<strong>{preview(p)}</strong><small>{label(p.status)}</small></button>)}{ev.length>3&&<small className="more-posts">+ ещё {ev.length-3}</small>}</div>})}</div>
     </section>
