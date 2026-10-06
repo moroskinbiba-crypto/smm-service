@@ -634,7 +634,7 @@ async function markInboxRead(ctx: any, threadId: string) {
 
 async function publishPost(ctx: any, postId: string) {
   const { data: post, error: postError } = await ctx.admin.from("posts")
-    .select("id,body,media,status,workspace_id,post_targets(id,social_account_id,platform,status,last_error,attempts)")
+    .select("id,body,media,status,workspace_id,post_targets(id,social_account_id,platform,publication_type,status,last_error,attempts)")
     .eq("id", postId)
     .eq("workspace_id", ctx.workspace.workspace_id)
     .maybeSingle();
