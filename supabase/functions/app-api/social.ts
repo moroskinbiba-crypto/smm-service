@@ -278,7 +278,7 @@ async function instagramCreateAndPublish(secret: Secret, igUserId: string, body:
   return String(published.id ?? creationId);
 }
 
-export async function instagramPublish(secret: Secret, igUserId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
+export async function instagramPublish(secret: Secret, igUserId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!media.length) throw new Error("Instagram требует минимум одно изображение или видео");
   if (publicationType === "story" && media.length !== 1) throw new Error("Instagram Story требует один файл");
   if (media.length > 1) throw new Error("Instagram-карусель пока будет следующим этапом; публикуйте один файл");
@@ -405,7 +405,7 @@ export async function publish(platform: Platform, secret: Secret, externalId: st
     case "vk": return vkPublish(secret, externalId, body, media, publicationType);
     case "max": return maxPublish(secret, externalId, body, media, publicationType);
     case "ok": return okPublish(secret, externalId, body, metadata, media, publicationType);
-    case "instagram": return instagramPublish(secret, externalId, body, media, publicationType);
+    case "instagram": return instagramPublish(secret, externalId, body, media, publicationType, metadata);
   }
 }
 
