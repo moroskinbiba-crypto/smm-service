@@ -105,7 +105,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <button type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(value => !value)}>
           <span /><span /><span />
         </button>
-        <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
+        <div className="brand"><span className="brand-mark">T</span><span>TGRML posting</span></div>
       </div>
       <nav className={mobileNavOpen ? 'main-nav mobile-open' : 'main-nav'} aria-label="Основная навигация">
         <Link className={active==='plan'?'nav-link active':'nav-link'} href="/">План публикаций</Link>
