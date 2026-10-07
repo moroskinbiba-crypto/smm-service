@@ -314,14 +314,13 @@ export default function AccountsPage(){
           {platform!=='vk'&&platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&<>
             <p className="section-copy">{meta[platform].help}</p>
             <label>Токен доступа<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Вставьте токен"/></label>
-            <label>{platform==='telegram'?'Chat ID / @username':platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder={platform==='telegram'?'@my_channel':'Например, 123456789'}/></label>
+            <label>{platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
 
             {platform==='ok'&&<><label>Application key<input value={appKey} onChange={e=>setAppKey(e.target.value)}/></label><label>Application secret<input type="password" value={appSecret} onChange={e=>setAppSecret(e.target.value)}/></label></>}
             <label>Название в сервисе<input value={name} onChange={e=>setName(e.target.value)} placeholder={meta[platform].name}/></label>
             <details className="connect-faq" open>
               <summary>FAQ: как подключить {meta[platform].name}</summary>
               <div className="connect-faq-body">
-                {platform==='telegram'&&<><p><strong>1.</strong> Создайте бота через @BotFather.</p><p><strong>2.</strong> Добавьте его в канал/чат и дайте права администратора.</p><p><strong>3.</strong> Укажите chat_id или @username.</p><p><strong>Stories:</strong> Business connection ID нужен только для Stories от имени подключённого Telegram Business аккаунта.</p><a href="https://core.telegram.org/bots/api" target="_blank" rel="noreferrer">Официальная документация Telegram →</a></>}
                 {platform==='ok'&&<><p>Используйте OAuth access token, application key/secret и ID группы.</p><a href="https://apiok.ru/" target="_blank" rel="noreferrer">Официальная документация OK →</a></>}
                 {platform==='max'&&<><p>Создайте MAX business-бота, получите токен и добавьте бота администратором в канал.</p><a href="https://dev.max.ru/docs-api" target="_blank" rel="noreferrer">Официальная документация MAX →</a></>}
               </div>
