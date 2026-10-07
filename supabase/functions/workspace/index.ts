@@ -98,6 +98,17 @@ Deno.serve(async (req: Request) => {
         if (error) throw error;
         return json({ ok: true, workspace: Array.isArray(data) ? data[0] : data });
       }
+      case "set-approval-mode": {
+        const enabled = body.enabled === true;
+        const { data, error } = await admin.rpc("set_workspace_approval_mode", {
+          p_workspace_id: selectedWorkspaceId,
+          p_user_id: user.id,
+          p_enabled: enabled,
+        });
+        if (error) throw error;
+        const workspace = Array.isArray(data) ? data[0] : data;
+        return json({ ok: true, approvals_enabled: workspace?.approvals_enabled === true });
+      }
       case "members": {
         const { data, error } = await admin.rpc("list_workspace_members_for_user", { p_user_id: user.id, p_workspace_id: selectedWorkspaceId });
         if (error) throw error;
