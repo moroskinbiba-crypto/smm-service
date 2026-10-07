@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { AppShell } from './components/app-shell';
 import { appRequest, type ApiPost, type SocialAccount, uploadMedia } from '../lib/app-api';
 
@@ -187,13 +188,20 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
 }
 
 export default function Home(){
-  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [workspaceApprovalEnabled,setWorkspaceApprovalEnabled]=useState(false); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [groups,setGroups]=useState<AccountGroup[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
-  async function load(){const [a,g,p]=await Promise.all([
+  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [workspaceApprovalEnabled,setWorkspaceApprovalEnabled]=useState(false); const [approvalsPending,setApprovalsPending]=useState(0); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [groups,setGroups]=useState<AccountGroup[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
+  async function load(){const [a,g,p,b]=await Promise.all([
     appRequest<{accounts:SocialAccount[]}>('list-accounts'),
     appRequest<{groups:AccountGroup[]}>('list-account-groups'),
-    appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string;approvals_enabled?:boolean}}>('list-posts',range(cursor))
-  ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setWorkspaceApprovalEnabled(p.workspace.approvals_enabled===true);setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
+    appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string;approvals_enabled?:boolean}}>('list-posts',range(cursor)),
+    appRequest<{approvals_pending:number}>('nav-badges')
+  ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setWorkspaceApprovalEnabled(p.workspace.approvals_enabled===true);setApprovalsPending(Number(b.approvals_pending??0));setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
+  useEffect(()=>{
+    if(!workspaceId)return;
+    const refresh=async()=>{try{const result=await appRequest<{approvals_pending:number}>('nav-badges');setApprovalsPending(Number(result.approvals_pending??0))}catch{}}
+    const timer=window.setInterval(()=>void refresh(),60000);
+    return()=>window.clearInterval(timer);
+  },[workspaceId]);
   const days=useMemo(()=>{if(view==='month'){const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))}const f=new Date(cursor);const monday=new Date(f);monday.setDate(f.getDate()-((f.getDay()+6)%7));if(view==='week')return Array.from({length:7},(_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i));return [new Date(cursor)]},[cursor,view]);
   const byDay=useMemo(()=>{const m=new Map<string,ApiPost[]>();for(const p of posts){const d=p.scheduled_at||(p.status==='published'?p.created_at:null);if(!d)continue;const k=new Date(d).toISOString().slice(0,10);m.set(k,[...(m.get(k)??[]),p])}return m},[posts]);
   async function bulk(action:'delete'|'clone'|'shift') {
@@ -252,6 +260,10 @@ export default function Home(){
     try{await appRequest('reschedule-post',{post_id:post.id,scheduled_at:next.toISOString()});await load()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось перенести публикацию')}
   }
   return <AppShell active="plan"><section className="page-section"><div className="page-heading"><div><div className="eyebrow">ПЛАН ПУБЛИКАЦИЙ</div><h1>{workspaceName}</h1><p>Календарь, редактор, медиа и планирование публикаций.</p></div><div className="plan-heading-actions"><input id="csv-import" type="file" accept=".csv,text/csv" hidden onChange={e=>{const file=e.target.files?.[0];if(file)void importCsv(file);e.currentTarget.value=''}}/><label className="secondary" htmlFor="csv-import">{importBusy?'Импортируем…':'Импорт CSV'}</label><button className="plus-button" onClick={()=>setEditor(null)}>＋</button></div></div>
+    {approvalsPending>0&&<Link className="approval-plan-banner" href="/approvals" aria-label="Открыть публикации на согласовании">
+      <span className="approval-plan-banner-copy"><strong>У вас на согласовании {approvalsPending} {approvalsPending===1?'публикация':approvalsPending>=2&&approvalsPending<=4?'публикации':'публикаций'}.</strong><small>Нажмите, чтобы открыть вкладку «Согласование».</small></span>
+      <span className="approval-plan-banner-action">Перейти к согласованиям →</span>
+    </Link>}
     <section className="card calendar-preview"><div className="calendar-toolbar"><div className="calendar-nav"><button className="secondary" onClick={()=>setCursor(view==='day'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()-1):view==='week'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()-7):new Date(cursor.getFullYear(),cursor.getMonth()-1,1))}>←</button><strong>{view==='day'?cursor.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}):cursor.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</strong><button className="secondary" onClick={()=>setCursor(view==='day'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1):view==='week'?new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+7):new Date(cursor.getFullYear(),cursor.getMonth()+1,1))}>→</button><button className="secondary" onClick={()=>setCursor(new Date())}>Сегодня</button><button className={view==='month'?'secondary active-period':'secondary'} onClick={()=>setView('month')}>Месяц</button><button className={view==='week'?'secondary active-period':'secondary'} onClick={()=>setView('week')}>Неделя</button><button className={view==='day'?'secondary active-period':'secondary'} onClick={()=>setView('day')}>День</button></div><span>{posts.length} публикаций</span></div>
       <div className={"calendar-grid calendar-view-"+view}>{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><div className="calendar-weekday" key={d}>{d}</div>)}{days.map(d=>{const k=d.toISOString().slice(0,10);const ev=byDay.get(k)??[];return <div key={k} className={(view==='month'&&d.getMonth()!==cursor.getMonth())?'calendar-cell muted-day':'calendar-cell'} onDragOver={e=>e.preventDefault()} onDrop={e=>void dropOnDay(d,e)}><span>{d.getDate()}</span>{ev.slice(0,3).map(p=><button key={p.id} draggable onDragStart={e=>startDrag(p.id,e)} className="calendar-post" onClick={()=>setEditor(p)}>{p.media[0]?.signed_url&&<img src={p.media[0].signed_url} alt=""/>}<div className="calendar-post-logos">{p.post_targets.map(t=><span key={t.id} className={logoClass(t.platform)}>{meta[t.platform]?.icon??'•'}</span>)}</div><strong>{preview(p)}</strong></button>)}{ev.length>3&&<small className="more-posts">+ ещё {ev.length-3}</small>}</div>})}</div>
     </section>
