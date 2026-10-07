@@ -1,4 +1,4 @@
-# SMM Service
+# TGRML posting
 
 Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram — следующим этапом.
 
