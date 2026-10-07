@@ -176,7 +176,7 @@ Deno.serve(async (req: Request) => {
         return;
       }
       const { data: target, error: targetError } = await admin.from("post_targets")
-        .select("id,platform,publication_type,social_account_id,external_post_id,metrics,posts!inner(workspace_id),social_accounts!inner(id,platform,external_id,status)")
+        .select("id,platform,publication_type,social_account_id,external_post_id,metrics,posts!inner(workspace_id),social_accounts!inner(id,platform,external_id,status,metadata)")
         .eq("id", targetId)
         .maybeSingle();
       if (targetError || !target || target.status !== "published" || !target.external_post_id || target.social_accounts?.status !== "connected") {
