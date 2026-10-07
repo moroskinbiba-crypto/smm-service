@@ -32,5 +32,3 @@ User
 
 ## Важное состояние
 Scheduler существует и запускается раз в минуту, но disabled=true до подключения реальных social adapters. Это предотвращает ложное выставление задач в publishing.
-
-<!-- deployment recovery trigger: 2026-10-07 -->
