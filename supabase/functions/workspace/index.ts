@@ -44,6 +44,24 @@ Deno.serve(async (req: Request) => {
 
   const selectedWorkspaceId = (req.headers.get("x-workspace-id") || "").trim() || null;
 
+  const { data: selectedRows, error: selectedWorkspaceError } = await admin.rpc("get_workspace_for_user", {
+    p_user_id: user.id,
+    p_workspace_id: selectedWorkspaceId,
+  });
+  if (selectedWorkspaceError) return json({ ok: false, error: selectedWorkspaceError.message }, 500);
+  const selectedWorkspace = Array.isArray(selectedRows) ? selectedRows[0] : selectedRows;
+  if (selectedWorkspace?.workspace_id) {
+    const { data: memberState, error: memberStateError } = await admin.from("workspace_members")
+      .select("member_suspended_at,member_suspended_reason")
+      .eq("workspace_id", selectedWorkspace.workspace_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (memberStateError) return json({ ok: false, error: memberStateError.message }, 500);
+    if (memberState?.member_suspended_at) {
+      return json({ ok: false, error: memberState.member_suspended_reason || "Участие в этом рабочем пространстве приостановлено" }, 403);
+    }
+  }
+
   let body: { action?: string; [key: string]: unknown };
   try {
     body = await req.json();
