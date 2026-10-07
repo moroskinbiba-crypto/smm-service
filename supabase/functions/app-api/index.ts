@@ -559,6 +559,21 @@ async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
         participant_external_id: item.participant_external_id ?? item.author_external_id ?? null,
         updated_at: new Date().toISOString(),
       }).eq("id", thread.id);
+
+      if (item.thread_type === "comment") {
+        const { data: members, error: membersError } = await ctx.admin.from("workspace_members")
+          .select("user_id")
+          .eq("workspace_id", ctx.workspace.workspace_id);
+        if (membersError) throw membersError;
+        const accountLabel = account.display_name || account.username || account.platform;
+        await createWorkspaceNotifications(
+          ctx,
+          (members ?? []).map((row: any) => row.user_id),
+          "Новый комментарий",
+          (item.author_name || "Пользователь") + " · " + accountLabel + ": " + item.body.slice(0, 240),
+          "new_comment",
+        );
+      }
     }
   }
 
@@ -2094,6 +2109,7 @@ Deno.serve(async (req: Request) => {
       case "request-approval":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          if (ctx.workspace.approvals_enabled !== true) throw new Error("Согласование выключено для этого рабочего пространства");
           const postId = String(body.post_id || "");
           if (!postId) throw new Error("Не указана публикация");
 
@@ -2115,6 +2131,7 @@ Deno.serve(async (req: Request) => {
         }
       case "review-approval":
         {
+          if (ctx.workspace.approvals_enabled !== true) throw new Error("Согласование выключено для этого рабочего пространства");
           const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
           if (!decision) throw new Error("Некорректное решение");
           const postId = String(body.post_id || "");
@@ -2152,6 +2169,9 @@ Deno.serve(async (req: Request) => {
         }
       case "list-approval-queue":
         {
+          if (ctx.workspace.approvals_enabled !== true) {
+            return json({ ok: true, posts: [], role: ctx.workspace.role, enabled: false });
+          }
           const { data, error } = await ctx.admin.from("posts")
             .select("id,body,media,status,scheduled_at,created_at,updated_at,approval_status,approval_requested_by,approval_comment,approval_updated_at,post_targets(id,platform,status,social_accounts(display_name,username))")
             .eq("workspace_id", ctx.workspace.workspace_id)
@@ -2160,6 +2180,26 @@ Deno.serve(async (req: Request) => {
             .limit(100);
           if (error) throw error;
           return json({ ok: true, posts: data ?? [], role: ctx.workspace.role });
+        }
+      case "nav-badges":
+        {
+          const [{ data: notificationRows, error: notificationError }, { data: threads, error: threadError }, { count: approvalCount, error: approvalError }] = await Promise.all([
+            ctx.admin.from("notifications").select("id").eq("user_id", ctx.user.id).is("read_at", null).limit(500),
+            ctx.admin.from("inbox_threads").select("unread_count").eq("workspace_id", ctx.workspace.workspace_id).limit(300),
+            ctx.admin.from("posts").select("id", { count: "exact", head: true })
+              .eq("workspace_id", ctx.workspace.workspace_id)
+              .eq("approval_status", "pending"),
+          ]);
+          if (notificationError) throw notificationError;
+          if (threadError) throw threadError;
+          if (approvalError) throw approvalError;
+          const unreadComments = (threads ?? []).reduce((sum: number, thread: any) => sum + Number(thread.unread_count ?? 0), 0);
+          return json({
+            ok: true,
+            comments_unread: unreadComments,
+            notifications_unread: (notificationRows ?? []).length,
+            approvals_pending: ctx.workspace.approvals_enabled === true ? Number(approvalCount ?? 0) : 0,
+          });
         }
       case "sync-inbox":
         {
