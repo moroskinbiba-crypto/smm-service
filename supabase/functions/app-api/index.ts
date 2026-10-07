@@ -1255,15 +1255,16 @@ Deno.serve(async (req: Request) => {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
           const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
           const username = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
-          if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
           const webhookSecret = Deno.env.get("MAX_WEBHOOK_SECRET") ?? "";
+          if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
+          if (!webhookSecret) throw new Error("MAX_WEBHOOK_SECRET ещё не настроен");
           const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
           if (supabaseUrl) {
             const subscriptionBody: Record<string, unknown> = {
               url: (supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl) + "/functions/v1/max-webhook",
               update_types: ["bot_added", "bot_removed", "chat_title_changed", "bot_admin_permissions_changed", "message_created"],
             };
-            if (webhookSecret) subscriptionBody.secret = webhookSecret;
+            subscriptionBody.secret = webhookSecret;
             const webhookResponse = await fetch("https://platform-api2.max.ru/subscriptions", {
               method: "POST",
               headers: { Authorization: token, "content-type": "application/json" },
