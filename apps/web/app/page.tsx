@@ -5,6 +5,7 @@ import { AppShell } from './components/app-shell';
 import { appRequest, type ApiPost, type SocialAccount, uploadMedia } from '../lib/app-api';
 
 type AccountGroup={id:string;name:string;description:string|null;account_ids:string[]};
+type PublishedMedia={name:string;path:string;signed_url:string|null;created_at:string|null};
 const meta: Record<string, {name:string; icon:string}> = {
   telegram:{name:'Telegram',icon:'➤'}, vk:{name:'VK',icon:'vk'},
   max:{name:'MAX',icon:'M'}, ok:{name:'Одноклассники',icon:'OK'},
@@ -37,8 +38,8 @@ function parseCsv(input:string){
   return rows;
 }
 
-function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:AccountGroup[];workspaceId:string;workspaceRole:string;onClose:()=>void;onSaved:()=>Promise<void>}){
-  const {post,accounts,groups,workspaceId,workspaceRole,onClose,onSaved}=props;
+function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:AccountGroup[];workspaceId:string;workspaceRole:string;approvalsEnabled:boolean;onClose:()=>void;onSaved:()=>Promise<void>}){
+  const {post,accounts,groups,workspaceId,workspaceRole,approvalsEnabled,onClose,onSaved}=props;
   const base=post?.scheduled_at?new Date(post.scheduled_at):new Date(Date.now()+3600000);
   const [text,setText]=useState(post?.body??'');
   const [selected,setSelected]=useState<string[]>(post?.post_targets.map(t=>t.social_account_id)??accounts.filter(a=>a.status==='connected').map(a=>a.id));
@@ -51,7 +52,10 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
   const [media,setMedia]=useState(post?.media??[]);
   const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(''); const [showEmoji,setShowEmoji]=useState(false);
   const [showAI,setShowAI]=useState(false); const [aiMode,setAiMode]=useState('improve'); const [aiBusy,setAiBusy]=useState(false);
-  const [showUTM,setShowUTM]=useState(false); const [utmSource,setUtmSource]=useState(''); const [utmMedium,setUtmMedium]=useState('social'); const [utmCampaign,setUtmCampaign]=useState(''); const [utmContent,setUtmContent]=useState('');
+  const [showUTM,setShowUTM]=useState(false);
+  const [publishedMedia,setPublishedMedia]=useState<PublishedMedia[]>([]);
+  const [selectedPublishedMedia,setSelectedPublishedMedia]=useState<string[]>([]);
+  const [publishedMediaBusy,setPublishedMediaBusy]=useState(false); const [utmSource,setUtmSource]=useState(''); const [utmMedium,setUtmMedium]=useState('social'); const [utmCampaign,setUtmCampaign]=useState(''); const [utmContent,setUtmContent]=useState('');
   function applyGroup(groupId:string){
     setSelectedGroupId(groupId);
     const group=groups.find(g=>g.id===groupId);
@@ -62,6 +66,29 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
   async function files(fs:FileList|File[]){setBusy(true);setMsg('');try{const incoming=Array.from(fs);if(media.length+incoming.length>10)throw new Error('В одной публикации можно добавить не более 10 медиафайлов');const next: Awaited<ReturnType<typeof uploadMedia>>[]=[];for(const f of incoming)next.push(await uploadMedia(workspaceId,f));setMedia(v=>[...v,...next]);}catch(e){setMsg(e instanceof Error?e.message:'Не удалось загрузить файл')}finally{setBusy(false)}}
   function wrap(a:string,b=a){const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;setText(text.slice(0,s)+a+text.slice(s,e)+b+text.slice(e));requestAnimationFrame(()=>{el.focus();el.setSelectionRange(s+a.length,e+a.length)})}
   async function save(kind:'draft'|'schedule'|'publish'){if(!selected.length){setMsg('Выберите хотя бы один аккаунт.');return}if(!text.trim()&&!media.length){setMsg('Добавьте текст или медиафайл.');return}setBusy(true);setMsg('');try{const x=await appRequest<{post_id:string}>('save-post',{post_id:post?.id,text,media,scheduled_at:kind==='draft'?null:new Date(date+'T'+time).toISOString(),target_account_ids:selected,target_publication_types:publicationTypes});if(kind==='publish'){const result=await appRequest<{status:string;results?:Array<{ok:boolean;error?:string}>}>('publish-now',{post_id:x.post_id});if(result.status!=='published'){await onSaved();const errors=(result.results??[]).filter(r=>!r.ok).map(r=>r.error).filter(Boolean);setMsg('Публикация завершена со статусом «'+label(result.status)+'». '+(errors.length?errors.join(' · '):'Проверьте статусы площадок.'));return;}}await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось сохранить')}finally{setBusy(false)}}
+  useEffect(() => {
+    void appRequest<{media:PublishedMedia[]}>('list-media').then(result => setPublishedMedia(result.media ?? [])).catch(() => undefined);
+  }, []);
+
+  async function deleteSelectedPublishedMedia() {
+    if (!selectedPublishedMedia.length) return;
+    if (!window.confirm('Удалить выбранные медиа? Файлы, которые используются в публикациях, сервис не удалит.')) return;
+    setPublishedMediaBusy(true);
+    setMsg('');
+    const failed:string[]=[];
+    for (const path of selectedPublishedMedia) {
+      try { await appRequest('delete-media',{path}); }
+      catch (e) { failed.push(e instanceof Error ? e.message : 'Не удалось удалить файл'); }
+    }
+    try {
+      const result=await appRequest<{media:PublishedMedia[]}>('list-media');
+      setPublishedMedia(result.media ?? []);
+    } catch {}
+    setSelectedPublishedMedia([]);
+    if (failed.length) setMsg(failed.join(' · '));
+    setPublishedMediaBusy(false);
+  }
+
   function applyUTM(){
     const el=document.querySelector<HTMLTextAreaElement>('#post-text');
     const source=el?.value??text;
@@ -125,7 +152,7 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
       <div className="editor-toolbar"><button onClick={()=>wrap('**')}>B</button><button onClick={()=>wrap('*')}>I</button><button onClick={()=>wrap(String.fromCharCode(96))}>&lt;&gt;</button><button onClick={()=>{const el=document.querySelector<HTMLTextAreaElement>('#post-text');if(!el)return;const s=el.selectionStart,e=el.selectionEnd;if(s===e)return;const url=window.prompt('Ссылка', 'https://');if(!url)return;setText(text.slice(0,s)+'['+text.slice(s,e)+']('+url+')'+text.slice(e))}}>🔗</button><button onClick={()=>setShowEmoji(v=>!v)}>😊</button><button className="ai-toolbar-button" onClick={()=>setShowAI(v=>!v)}>✨ AI</button><button onClick={()=>setShowUTM(v=>!v)}>UTM</button></div>
       {showUTM&&<div className="ai-popover utm-popover"><strong>UTM-метки</strong><input value={utmSource} onChange={e=>setUtmSource(e.target.value)} placeholder="utm_source"/><input value={utmMedium} onChange={e=>setUtmMedium(e.target.value)} placeholder="utm_medium"/><input value={utmCampaign} onChange={e=>setUtmCampaign(e.target.value)} placeholder="utm_campaign"/><input value={utmContent} onChange={e=>setUtmContent(e.target.value)} placeholder="utm_content"/><button className="primary" onClick={applyUTM}>Добавить метки</button></div>}{showAI&&<div className="ai-popover"><strong>AI-помощник</strong><select value={aiMode} onChange={e=>setAiMode(e.target.value)}><option value="improve">Улучшить текст</option><option value="shorten">Сократить</option><option value="sales">Сделать продающим</option><option value="headline">5 вариантов заголовка</option><option value="variants">3 варианта поста</option><option value="adapt">Адаптировать под площадку</option></select><button className="primary" disabled={aiBusy} onClick={()=>void runAI()}>{aiBusy?'Генерируем…':'Применить AI'}</button></div>}{showEmoji&&<div className="emoji-popover">{emojis.map(x=><button key={x} onClick={()=>{setText(v=>v+x);setShowEmoji(false)}}>{x}</button>)}</div>}
       <textarea id="post-text" className="post-editor-textarea" value={text} onChange={e=>setText(e.target.value)} placeholder="Текст публикации…" />
-      <div className="upload-area" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void files(e.dataTransfer.files)}}><input id="post-file" hidden type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-matroska" multiple onChange={e=>{if(e.target.files)void files(e.target.files)}}/><label htmlFor="post-file"><strong>Добавить фото или видео</strong><span>до 10 файлов, видео до 250 МБ</span></label></div>
+      <div className="upload-area" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void files(e.dataTransfer.files)}}><input id="post-file" hidden type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/x-matroska" multiple onChange={e=>{if(e.target.files)void files(e.target.files)}}/><label htmlFor="post-file"><strong>Добавить фото или видео</strong><span>до 10 файлов, видео до 50 МБ</span></label></div>
       {!!media.length&&<div className="media-list">{media.map((m,i)=><div className="media-item" key={m.path} draggable onDragStart={e=>e.dataTransfer.setData('text/plain',String(i))} onDragOver={e=>e.preventDefault()} onDrop={e=>{const from=Number(e.dataTransfer.getData('text/plain'));if(Number.isNaN(from)||from===i)return;const n=[...media];const [x]=n.splice(from,1);n.splice(i,0,x);setMedia(n.map((q,j)=>({...q,order:j})))}}><div className="media-thumb">{m.signed_url?(m.type?.startsWith('video/')?<video src={m.signed_url} muted playsInline />:<img src={m.signed_url} alt=""/>):m.type?.startsWith('video/')?'🎬':'🖼️'}</div><div className="media-info"><strong>{m.name}</strong><span>Перетащите или используйте стрелки для изменения порядка</span></div><div className="media-actions"><button className="secondary" disabled={i===0} onClick={()=>{if(i===0)return;const n=[...media];[n[i-1],n[i]]=[n[i],n[i-1]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↑</button><button className="secondary" disabled={i===media.length-1} onClick={()=>{if(i>=media.length-1)return;const n=[...media];[n[i],n[i+1]]=[n[i+1],n[i]];setMedia(n.map((q,j)=>({...q,order:j})))}}>↓</button><button className="secondary" onClick={()=>setMedia(v=>v.filter((_,j)=>j!==i))}>Удалить</button></div></div>)}</div>}
     </section>
     <aside className="editor-aside"><div className="editor-block"><h3>Площадки</h3>
@@ -143,17 +170,29 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
 </div>)}</div>{post?.post_targets?.some(t=>t.last_error)&&<div className="target-errors">{post.post_targets.filter(t=>t.last_error).map(t=><div key={t.id}><strong>{meta[t.platform]?.name??t.platform}:</strong> {t.last_error}</div>)}</div>}{!accounts.length&&<div className="empty small-empty">Подключите аккаунт.</div>}</div>
       <div className="editor-block"><h3>Планирование</h3><div className="schedule-form"><label>Дата<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><label>Время<input type="time" value={time} onChange={e=>setTime(e.target.value)}/></label></div></div>
       {msg&&<div className="auth-message">{msg}</div>}</aside></div>
-    <div className="modal-actions"><div className="modal-actions-left">{post?.id&&(!post.approval_status || post.approval_status==='not_required' || post.approval_status==='rejected')&&workspaceRole!=='viewer'&&<button className="secondary" disabled={busy} onClick={()=>void requestApproval()}>Отправить на согласование</button>}{post?.approval_status==='pending'&&['owner','admin','approver'].includes(workspaceRole)&&<><button className="secondary" disabled={busy} onClick={()=>void reviewApproval('approved')}>Одобрить</button><button className="secondary danger-button" disabled={busy} onClick={()=>void reviewApproval('rejected')}>Отклонить</button></>}{post?.status==='scheduled'&&<button className="secondary danger-button" disabled={busy} onClick={async()=>{setBusy(true);setMsg('');try{await appRequest('cancel-post',{post_id:post.id});await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось отменить')}finally{setBusy(false)}}}>Отменить публикацию</button>}<button className="secondary" disabled={busy} onClick={()=>void save('draft')}>Сохранить черновик</button></div><div className="modal-actions-right"><button className="secondary" disabled={busy} onClick={()=>void save('schedule')}>{busy?'Сохраняем…':'Запланировать'}</button><button className="primary modal-primary" disabled={busy} onClick={()=>void save('publish')}>{busy?'Отправляем…':'Опубликовать сейчас'}</button></div></div>
+    <section className="published-media-section card">
+      <div className="card-head"><div><h3>Опубликованные медиа</h3><span>{publishedMedia.length} файлов</span></div><button className="secondary danger-button" disabled={publishedMediaBusy||!selectedPublishedMedia.length} onClick={()=>void deleteSelectedPublishedMedia()}>Удалить выбранные</button></div>
+      <div className="published-media-grid">
+        {publishedMedia.map(item=><label className={selectedPublishedMedia.includes(item.path)?'published-media-item selected':'published-media-item'} key={item.path}>
+          <input type="checkbox" checked={selectedPublishedMedia.includes(item.path)} onChange={event=>setSelectedPublishedMedia(v=>event.target.checked?[...v,item.path]:v.filter(path=>path!==item.path))} />
+          <div className="published-media-preview">{item.signed_url?<img src={item.signed_url} alt="" />:<span>🖼️</span>}</div>
+          <span className="published-media-name">{item.name}</span>
+          <small>{item.created_at?new Date(item.created_at).toLocaleDateString('ru-RU'):''}</small>
+        </label>)}
+        {!publishedMedia.length&&<div className="empty small-empty">Опубликованных медиа пока нет.</div>}
+      </div>
+    </section>
+    <div className="modal-actions"><div className="modal-actions-left">{approvalsEnabled&&post?.id&&(!post.approval_status || post.approval_status==='not_required' || post.approval_status==='rejected')&&workspaceRole!=='viewer'&&<button className="secondary" disabled={busy} onClick={()=>void requestApproval()}>Отправить на согласование</button>}{approvalsEnabled&&post?.approval_status==='pending'&&<span className="approval-badge approval-pending">Ожидает согласования</span>}{post?.approval_status==='pending'&&['owner','admin','approver'].includes(workspaceRole)&&<><button className="secondary" disabled={busy} onClick={()=>void reviewApproval('approved')}>Одобрить</button><button className="secondary danger-button" disabled={busy} onClick={()=>void reviewApproval('rejected')}>Отклонить</button></>}{post?.status==='scheduled'&&<button className="secondary danger-button" disabled={busy} onClick={async()=>{setBusy(true);setMsg('');try{await appRequest('cancel-post',{post_id:post.id});await onSaved();onClose()}catch(e){setMsg(e instanceof Error?e.message:'Не удалось отменить')}finally{setBusy(false)}}}>Отменить публикацию</button>}<button className="secondary" disabled={busy} onClick={()=>void save('draft')}>Сохранить черновик</button></div><div className="modal-actions-right"><button className="secondary" disabled={busy} onClick={()=>void save('schedule')}>{busy?'Сохраняем…':'Запланировать'}</button><button className="primary modal-primary" disabled={busy} onClick={()=>void save('publish')}>{busy?'Отправляем…':'Опубликовать сейчас'}</button></div></div>
   </div></div>
 }
 
 export default function Home(){
-  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [groups,setGroups]=useState<AccountGroup[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
+  const [workspaceId,setWorkspaceId]=useState(''); const [workspaceName,setWorkspaceName]=useState('Рабочее пространство'); const [workspaceRole,setWorkspaceRole]=useState('owner'); const [workspaceApprovalEnabled,setWorkspaceApprovalEnabled]=useState(false); const [accounts,setAccounts]=useState<SocialAccount[]>([]); const [groups,setGroups]=useState<AccountGroup[]>([]); const [selectedIds,setSelectedIds]=useState<string[]>([]); const [bulkBusy,setBulkBusy]=useState(false); const [importBusy,setImportBusy]=useState(false); const [posts,setPosts]=useState<ApiPost[]>([]); const [cursor,setCursor]=useState(new Date()); const [view,setView]=useState<'month'|'week'|'day'>('month'); const [editor,setEditor]=useState<ApiPost|null|undefined>(undefined); const [msg,setMsg]=useState('');
   async function load(){const [a,g,p]=await Promise.all([
     appRequest<{accounts:SocialAccount[]}>('list-accounts'),
     appRequest<{groups:AccountGroup[]}>('list-account-groups'),
     appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string}}>('list-posts',range(cursor))
-  ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
+  ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setWorkspaceApprovalEnabled(p.workspace.approvals_enabled===true);setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
   const days=useMemo(()=>{if(view==='month'){const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))}const f=new Date(cursor);const monday=new Date(f);monday.setDate(f.getDate()-((f.getDay()+6)%7));if(view==='week')return Array.from({length:7},(_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i));return [new Date(cursor)]},[cursor,view]);
   const byDay=useMemo(()=>{const m=new Map<string,ApiPost[]>();for(const p of posts){const d=p.scheduled_at||(p.status==='published'?p.created_at:null);if(!d)continue;const k=new Date(d).toISOString().slice(0,10);m.set(k,[...(m.get(k)??[]),p])}return m},[posts]);
@@ -218,5 +257,5 @@ export default function Home(){
     </section>
     <section className="card plan-list-card"><div className="card-head"><h2>Ближайшие публикации</h2><span>{posts.length}</span></div>
       {!!selectedIds.length&&<div className="bulk-toolbar"><strong>Выбрано: {selectedIds.length}</strong><div className="bulk-actions"><button className="secondary" disabled={bulkBusy} onClick={()=>void bulk('clone')}>Дублировать</button><button className="secondary" disabled={bulkBusy} onClick={()=>void bulk('shift')}>Перенести</button><button className="secondary danger-button" disabled={bulkBusy} onClick={()=>void bulk('delete')}>Удалить</button></div></div>}
-      <div className="plan-list">{posts.slice(0,15).map(p=><div className="plan-row" key={p.id}><input className="plan-select" type="checkbox" checked={selectedIds.includes(p.id)} onChange={e=>setSelectedIds(v=>e.target.checked?[...v,p.id]:v.filter(id=>id!==p.id))}/><div className="plan-date">{p.scheduled_at?new Date(p.scheduled_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Без даты'}</div><div className="plan-content"><div className="post-target-logos">{p.post_targets.map(t=><span key={t.id} className={logoClass(t.platform)}>{meta[t.platform]?.icon??'•'}</span>)}</div><strong>{preview(p)}</strong></div><button className="secondary" onClick={()=>setEditor(p)}>Открыть</button><button className="secondary danger-button" onClick={()=>void remove(p.id)}>Удалить</button></div>)}{!posts.length&&<div className="empty small-empty">Пока нет публикаций. Нажмите «+».</div>}</div></section>{msg&&<div className="auth-message">{msg}</div>}</section>{editor!==undefined&&<Editor post={editor} accounts={accounts} groups={groups} workspaceId={workspaceId} workspaceRole={workspaceRole} onClose={()=>setEditor(undefined)} onSaved={load}/>}</AppShell>
+      <div className="plan-list">{posts.slice(0,15).map(p=><div className="plan-row" key={p.id}><input className="plan-select" type="checkbox" checked={selectedIds.includes(p.id)} onChange={e=>setSelectedIds(v=>e.target.checked?[...v,p.id]:v.filter(id=>id!==p.id))}/><div className="plan-date">{p.scheduled_at?new Date(p.scheduled_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'Без даты'}</div><div className="plan-content"><div className="post-target-logos">{p.post_targets.map(t=><span key={t.id} className={logoClass(t.platform)}>{meta[t.platform]?.icon??'•'}</span>)}</div><strong>{preview(p)}</strong></div><button className="secondary" onClick={()=>setEditor(p)}>Открыть</button><button className="secondary danger-button" onClick={()=>void remove(p.id)}>Удалить</button></div>)}{!posts.length&&<div className="empty small-empty">Пока нет публикаций. Нажмите «+».</div>}</div></section>{msg&&<div className="auth-message">{msg}</div>}</section>{editor!==undefined&&<Editor post={editor} accounts={accounts} groups={groups} workspaceId={workspaceId} workspaceRole={workspaceRole} approvalsEnabled={workspaceApprovalEnabled} onClose={()=>setEditor(undefined)} onSaved={load}/>}</AppShell>
 }
