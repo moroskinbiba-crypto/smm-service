@@ -54,6 +54,8 @@ Deno.serve(async (req: Request) => {
   try {
     switch (body.action) {
       case "list-workspaces": {
+        const { error: personalError } = await admin.rpc("ensure_personal_workspace_for_user", { p_user_id: user.id, p_timezone: profile?.timezone || "Europe/Moscow" });
+        if (personalError) throw personalError;
         const { data, error } = await admin.rpc("list_workspaces_for_user", { p_user_id: user.id });
         if (error) throw error;
         return json({ ok: true, workspaces: data ?? [] });
