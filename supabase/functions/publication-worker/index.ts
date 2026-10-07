@@ -6,6 +6,39 @@ function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+function sanitizeExternalError(error: unknown) {
+  let message = error instanceof Error ? error.message : String(error ?? "Неизвестная ошибка");
+  message = message
+    .replace(/([?&](?:access_token|client_secret|refresh_token|token|api_key|code)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/https?:\/\/api\.telegram\.org\/bot[^/\s]+/gi, "https://api.telegram.org/bot[REDACTED]")
+    .replace(/Authorization\s*:\s*[^\s]+/gi, "Authorization: [REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [REDACTED]");
+  return message.slice(0, 1000);
+}
+
+function effectiveSecret(account: any, stored: any) {
+  const method = String(account?.metadata?.connection_method ?? "");
+  if (account?.platform === "telegram" && (method === "service_bot" || method === "business_bot")) {
+    const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный Telegram-бот не настроен");
+    return { access_token: token };
+  }
+  if (account?.platform === "max" && method === "service_bot") {
+    const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный MAX-бот не настроен");
+    return { access_token: token };
+  }
+  return stored ?? {};
+}
+
+function isRetryablePublishError(error: unknown) {
+  const message = sanitizeExternalError(error);
+  if (/(\b400\b|\b401\b|\b403\b|\b404\b|invalid|unauthorized|forbidden|permission|не найден|неверн|слишком длин|too long|unsupported|not allowed|token)/i.test(message)) {
+    return false;
+  }
+  return true;
+}
+
 async function signedMedia(admin: any, media: any) {
   const items = Array.isArray(media) ? media : [];
   return Promise.all(items.map(async (item: any, index: number) => {
@@ -137,7 +170,7 @@ Deno.serve(async (req: Request) => {
 
     const claimedMap = new Map(claimed.map((x: any) => [String(x.target_id), x]));
 
-    for (const item of messages) {
+    const processMessage = async (item: any) => {
       const targetId = String(item.target_id || "");
       const claim = claimedMap.get(targetId);
       if (!claim) {
@@ -167,10 +200,12 @@ Deno.serve(async (req: Request) => {
       }
 
       affectedPosts.add(target.post_id);
+      let externalPublished = false;
       try {
         const account = target.social_accounts;
         const post = target.posts;
-        const secret = await getSecret(supabase, account.id);
+        const storedSecret = await getSecret(supabase, account.id);
+        const secret = effectiveSecret(account, storedSecret);
         const media = await signedMedia(supabase, post.media);
         const externalPostId = await publish(
           account.platform,
@@ -181,6 +216,7 @@ Deno.serve(async (req: Request) => {
           account.metadata ?? {},
           target.publication_type || "feed",
         );
+        externalPublished = true;
 
         const { error: updateError } = await supabase.from("post_targets").update({
           status: "published",
@@ -198,7 +234,27 @@ Deno.serve(async (req: Request) => {
           metrics_last_error: null,
           updated_at: new Date().toISOString(),
         }).eq("id", target.id).eq("lock_token", claim.lock_token);
-        if (updateError) throw updateError;
+        if (updateError) {
+          const safe = sanitizeExternalError(updateError);
+          await supabase.from("post_targets").update({
+            status: "failed",
+            attempts: 5,
+            last_error: "Внешняя публикация подтверждена, но результат не сохранён: " + safe,
+            next_attempt_at: null,
+            lock_token: null,
+            lock_until: null,
+            queue_enqueued_at: null,
+            updated_at: new Date().toISOString(),
+          }).eq("id", target.id).eq("lock_token", claim.lock_token);
+          await supabase.from("publication_logs").insert({
+            post_target_id: target.id,
+            level: "error",
+            message: "Внешняя публикация выполнена; автоматический повтор запрещён во избежание дубля.",
+            details: { platform: account.platform, publish_operation_id: target.publish_operation_id },
+          });
+          failed++;
+          return;
+        }
 
         await supabase.from("publication_logs").insert({
           post_target_id: target.id,
@@ -217,9 +273,29 @@ Deno.serve(async (req: Request) => {
         await supabase.from("stats_cache").delete().eq("workspace_id", post.workspace_id);
         published++;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = sanitizeExternalError(error);
         const attempts = Number(target.attempts ?? claim.attempts ?? 1);
-        const retry = attempts < 5;
+        if (externalPublished) {
+          await supabase.from("post_targets").update({
+            status: "failed",
+            attempts: 5,
+            last_error: "Внешняя публикация выполнена; автоматический повтор запрещён: " + message,
+            next_attempt_at: null,
+            lock_token: null,
+            lock_until: null,
+            queue_enqueued_at: null,
+            updated_at: new Date().toISOString(),
+          }).eq("id", target.id).eq("lock_token", claim.lock_token);
+          await supabase.from("publication_logs").insert({
+            post_target_id: target.id,
+            level: "error",
+            message: "Внешняя публикация выполнена; автоматический повтор запрещён во избежание дубля.",
+            details: { platform: target.platform, attempts, publish_operation_id: target.publish_operation_id },
+          });
+          failed++;
+          return;
+        }
+        const retry = attempts < 5 && isRetryablePublishError(error);
         const retryMinutes = Math.min(30, Math.pow(2, Math.max(0, attempts - 1)));
         const jitterSeconds = Math.floor(Math.random() * 30);
         const nextAttempt = retry ? new Date(Date.now() + retryMinutes * 60 * 1000 + jitterSeconds * 1000).toISOString() : null;
@@ -249,9 +325,11 @@ Deno.serve(async (req: Request) => {
         failed++;
       }
 
-      try {
-        await supabase.rpc("archive_publication_job", { p_msg_id: Number(item.msg_id) });
-      } catch {}
+      try { await supabase.rpc("archive_publication_job", { p_msg_id: Number(item.msg_id) }); } catch {}
+    };
+
+    for (let i = 0; i < messages.length; i += 5) {
+      await Promise.all(messages.slice(i, i + 5).map(processMessage));
     }
 
     for (const postId of affectedPosts) {
