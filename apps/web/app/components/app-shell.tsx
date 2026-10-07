@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import { createClient } from '../../lib/supabase/client';
 import { workspaceRequest } from '../../lib/workspace-api';
 import { appRequest } from '../../lib/app-api';
@@ -10,6 +11,7 @@ type Workspace = { workspace_id: string; workspace_name: string; workspace_timez
 type WorkspaceOption = Workspace;
 
 export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'recurrences' | 'competitors' | 'content' | 'notifications' | 'automation' | 'media' | 'admin'; children: ReactNode }) {
+  const pathname = usePathname();
   const supabase = createClient();
   const [theme, setTheme] = useState<'light'|'dark'>('light');
   const [workspace, setWorkspace] = useState<Workspace|null>(null);
@@ -106,7 +108,11 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <button className="profile-button" onClick={signOut}>Выйти</button>
       </div>
     </header>
-    {children}
-    <a className="floating-contact" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться в Telegram">Telegram · @truegromle</a>
+    <div key={pathname} className="app-page-transition">{children}</div>
+    <a className="floating-contact" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться в Telegram" title="Связаться в Telegram">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21.7 3.5 18.4 20c-.25 1.2-.9 1.5-1.8.95l-5-3.7-2.4 2.3c-.27.27-.5.5-1.03.5l.36-5.1 9.28-8.38c.4-.36-.09-.56-.62-.2L5.7 13.06.8 11.53c-1.07-.34-1.1-1.08.22-1.58L20.2 2.82c.86-.31 1.61.2 1.5.68Z" />
+      </svg>
+    </a>
   </main>;
 }

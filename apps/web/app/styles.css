@@ -11,7 +11,19 @@
 @media(max-width:900px){.editor-grid,.account-page-grid{grid-template-columns:1fr}.plan-row{grid-template-columns:22px 1fr auto}.plan-date{grid-column:1/-1}.connected-account{grid-template-columns:40px 1fr auto}.connected-account .secondary{grid-column:auto}.stats-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.post-editor-modal{padding:16px}.modal-actions{display:grid}.modal-actions-right{display:grid}.modal-actions-right button{width:100%}.stats-grid{grid-template-columns:1fr}.stats-row{grid-template-columns:1.3fr repeat(4,.8fr);font-size:12px;overflow:auto}.connected-account{grid-template-columns:40px 1fr}.connected-account .account-status{justify-self:start}.connected-account .secondary{width:100%}}
 
-.page-loading{min-height:70vh;display:grid;place-items:center;align-content:center;gap:12px;opacity:.65}.loading-spinner{width:24px;height:24px;border:3px solid #dfe3ea;border-top-color:#111;border-radius:50%;animation:smm-spin .8s linear infinite}.dark .loading-spinner{border-color:#343944;border-top-color:#fff}@keyframes smm-spin{to{transform:rotate(360deg)}}
+.page-loading{min-height:70vh;display:grid;place-items:center;align-content:center;gap:12px;opacity:.65}.loading-spinner{width:24px;height:24px;border:3px solid #dfe3ea;border-top-color:#111;border-radius:50%;animation:smm-spin .8s linear infinite}.dark .loading-spinner{border-color:#343944;border-top-color:#fff}
+.app-page-transition{animation:smm-page-fade .28s cubic-bezier(.22,.61,.36,1) both;will-change:opacity,transform}
+@keyframes smm-page-fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.floating-contact{position:fixed;right:22px;bottom:22px;width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:#111;color:#fff;text-decoration:none;box-shadow:0 12px 30px rgba(20,24,35,.18);z-index:900;transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease}
+.floating-contact:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(20,24,35,.24)}
+.floating-contact:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+.floating-contact svg{width:21px;height:21px;fill:currentColor}
+.dark .floating-contact{background:#fff;color:#111;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.route-loading{min-height:70vh;animation:smm-route-loading 1s ease-in-out infinite alternate}
+.route-loading-mark{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:#111;color:#fff;font-weight:900;box-shadow:0 12px 30px rgba(20,24,35,.12)}
+.dark .route-loading-mark{background:#fff;color:#111}
+@keyframes smm-route-loading{from{opacity:.48;transform:scale(.98)}to{opacity:1;transform:scale(1.02)}}
+@media (prefers-reduced-motion:reduce){.app-page-transition,.route-loading{animation:none}.floating-contact{transition:none}}@keyframes smm-spin{to{transform:rotate(360deg)}}
 
 .media-actions{display:flex;gap:5px;align-items:center}.media-actions .secondary{padding:7px 9px}.stats-actions{display:flex;justify-content:flex-end;margin-top:14px}
 
@@ -334,3 +346,6 @@
  .workspace-switcher{min-width:170px;max-width:220px}
  .account-group-checks{grid-template-columns:1fr}
 }
+
+.telegram-notify-explainer{margin-top:14px;display:grid;gap:7px;padding:14px;border:1px solid #e1e4ea;border-radius:14px;background:#f7f8fb;font-size:12px;line-height:1.5}.telegram-notify-explainer strong{font-size:13px}.telegram-notify-explainer span,.telegram-notify-explainer small{opacity:.68}.telegram-notify-explainer small{margin-top:2px}.dark .telegram-notify-explainer{border-color:#2a2e38;background:#20242c}
+.telegram-feature-card{display:grid;gap:4px;padding:13px;border:1px solid #e1e4ea;border-radius:14px;background:#f7f8fb}.telegram-feature-card strong{font-size:13px}.telegram-feature-card small{opacity:.65;line-height:1.45}.telegram-story-notice{display:grid;gap:6px;margin-top:14px;padding:13px;border:1px dashed #cfd4dd;border-radius:14px;font-size:12px;line-height:1.5}.telegram-story-notice strong{font-size:13px}.telegram-story-notice span,.telegram-story-notice small{opacity:.68}.dark .telegram-feature-card{background:#20242c;border-color:#2a2e38}.dark .telegram-story-notice{border-color:#3b404a}

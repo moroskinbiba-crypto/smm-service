@@ -258,6 +258,9 @@ async function savePost(ctx: any, body: any) {
     platform: account.platform,
     publication_type: typeof publicationTypes[account.id] === "string" ? publicationTypes[account.id] : "feed",
   }));
+  if (targets.some((target: any) => target.platform === "telegram" && target.publication_type === "story")) {
+    throw new Error("Stories от имени Telegram-канала требуют отдельного пользовательского Telegram API-подключения и пока не доступны через обычного бота.");
+  }
 
   const desiredStatus = body.status === "canceled" ? "canceled" : (scheduledAt ? "scheduled" : "draft");
   const { data, error } = await ctx.admin.rpc("save_post_bundle", {
@@ -1194,7 +1197,10 @@ Deno.serve(async (req: Request) => {
       case "telegram-service-start":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
-          const mode = body.mode === "business" ? "business" : "channel";
+          const mode = "channel";
+          if (body.mode === "business") {
+            throw new Error("Telegram Business не используется для Stories каналов. Подключите Telegram-канал обычным способом.");
+          }
           const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
           const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
           const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
