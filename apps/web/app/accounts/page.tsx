@@ -7,7 +7,7 @@ import { appRequest, type SocialAccount } from '../../lib/app-api';
 type Platform='telegram'|'vk'|'max'|'ok'|'instagram';
 
 const meta: Record<Platform,{name:string;icon:string;help:string}> = {
-  telegram:{name:'Telegram',icon:'➤',help:'Два способа: токен вашего бота или бот SMM-сервиса. Для Telegram Business Stories используйте отдельный Business-сценарий — connection ID вводить не нужно.'},
+  telegram:{name:'Telegram',icon:'➤',help:'Подключите Telegram-канал для обычных публикаций. Личные уведомления подключаются отдельно через Telegram-бота.'},
   vk:{name:'VK',icon:'vk',help:'Удобнее войти через VK OAuth и выбрать нужное сообщество прямо в сервисе.'},
   max:{name:'MAX',icon:'M',help:'Два способа: токен вашего бота или подключение через служебного бота, добавленного в канал.'},
   ok:{name:'Одноклассники',icon:'OK',help:'OAuth access token + application key/secret + ID группы.'},
@@ -23,7 +23,6 @@ export default function AccountsPage(){
   const [platform,setPlatform]=useState<Platform>('telegram');
   const [maxMode,setMaxMode]=useState<'token'|'service_bot'>('token');
   const [telegramMode,setTelegramMode]=useState<'own_bot'|'service_bot'>('own_bot');
-  const [telegramServiceMode,setTelegramServiceMode]=useState<'channel'|'business'>('channel');
   const [token,setToken]=useState('');
   const [externalId,setExternalId]=useState('');
   const [name,setName]=useState('');
@@ -37,7 +36,7 @@ export default function AccountsPage(){
   const [metaCandidates,setMetaCandidates]=useState<MetaCandidate[]>([]);
   const [oauthProvider,setOauthProvider]=useState<'vk'|'meta'|null>(null);
   const [maxConnect,setMaxConnect]=useState<{code:string;expires_at:string;bot_username:string;instructions:string}|null>(null);
-  const [telegramConnect,setTelegramConnect]=useState<{mode:'channel'|'business';code:string;expires_at:string;bot_username:string;instructions:string;start_url?:string}|null>(null);
+  const [telegramConnect,setTelegramConnect]=useState<{mode:'channel';code:string;expires_at:string;bot_username:string;instructions:string}|null>(null);
   const [groups,setGroups]=useState<AccountGroup[]>([]);
   const [groupName,setGroupName]=useState('');
   const [groupDescription,setGroupDescription]=useState('');
@@ -276,33 +275,30 @@ export default function AccountsPage(){
             </div>
           </div>}
           {platform==='telegram'&&telegramMode==='service_bot'&&<div className="max-service-form">
-            <div className="connect-method-badge">Вариант 2 · Бот SMM-сервиса</div>
-            <p className="section-copy">Выберите, что хотите подключить через нашего Telegram-бота.</p>
-            <div className="max-method-tabs">
-              <button className={telegramServiceMode==='channel'?'max-method active':'max-method'} onClick={()=>setTelegramServiceMode('channel')}><strong>Telegram-канал</strong><small>Постинг обычных публикаций</small></button>
-              <button className={telegramServiceMode==='business'?'max-method active':'max-method'} onClick={()=>setTelegramServiceMode('business')}><strong>Telegram Business</strong><small>Stories от имени аккаунта</small></button>
+            <div className="connect-method-badge">Бот TGRMLposting</div>
+            <p className="section-copy">Самый простой способ подключить Telegram-канал. Токен создавать не нужно.</p>
+            <div className="telegram-feature-card">
+              <strong>Telegram-канал</strong>
+              <small>Посты публикуются прямо в выбранный канал от имени канала.</small>
             </div>
             <ol className="max-steps">
-              {telegramServiceMode==='channel'?<>
-                <li>Нажмите «Получить код подключения».</li>
-                <li>Добавьте нашего бота в канал как администратора с правом публикации.</li>
-                <li>Отправьте в канале сообщение <b>/connect КОД</b>.</li>
-                <li>Канал автоматически появится в списке аккаунтов.</li>
-              </>:<>
-                <li>Нажмите «Получить код подключения» и откройте ссылку.</li>
-                <li>Нажмите <b>Start</b> в Telegram.</li>
-                <li>В Telegram Business → Чат-боты подключите нашего бота.</li>
-                <li>Разрешите право <b>Управление историями</b>.</li>
-              </>}
+              <li>Нажмите «Получить код подключения».</li>
+              <li>Добавьте нашего бота в нужный канал как администратора с правом публикации сообщений.</li>
+              <li>Отправьте в канале сообщение <b>/connect КОД</b>.</li>
+              <li>Канал автоматически появится в списке аккаунтов.</li>
             </ol>
-            <button className="primary" disabled={busy} onClick={()=>void startTelegramServiceBot(telegramServiceMode)}>{busy?'Готовим…':'Получить код подключения'}</button>
-            {telegramConnect&&telegramConnect.mode===telegramServiceMode&&<div className="max-connect-code">
+            <button className="primary" disabled={busy} onClick={()=>void startTelegramServiceBot('channel')}>{busy?'Готовим…':'Получить код подключения'}</button>
+            {telegramConnect?.mode==='channel'&&<div className="max-connect-code">
               <strong>Код: {telegramConnect.code}</strong>
               <span>Бот: @{telegramConnect.bot_username.replace(/^@/,'')} · до {new Date(telegramConnect.expires_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span>
-              {telegramConnect.start_url&&<a href={telegramConnect.start_url} target="_blank" rel="noreferrer">Открыть бота и продолжить →</a>}
-              <code>{telegramServiceMode==='channel'?'/connect '+telegramConnect.code:'/start '+telegramConnect.code}</code>
+              <code>/connect {telegramConnect.code}</code>
               <small>{telegramConnect.instructions}</small>
             </div>}
+            <div className="telegram-story-notice">
+              <strong>Stories от имени канала</strong>
+              <span>Эта функция подключается отдельно: Telegram разрешает публикацию Stories канала через пользовательский API-доступ, а не через обычный Bot API. Поэтому мы не выдаём здесь ложную кнопку «Business».</span>
+              <small>Обычные публикации канала уже подключаются этим способом.</small>
+            </div>
           </div>}          {platform==='max'&&<div className="max-connect-choice">
             <div className="connection-method-heading"><strong>Способ подключения MAX</strong><small>Выберите один из двух вариантов</small></div>
             <div className="max-method-tabs">
