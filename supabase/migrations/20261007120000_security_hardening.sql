@@ -359,3 +359,100 @@ create index if not exists telegram_notification_subscriptions_membership_idx
   on public.telegram_notification_subscriptions(workspace_id,user_id);
 
 revoke all on function public.set_updated_at() from public,anon,authenticated;
+
+ 
+create or replace function public.create_recurrence_instance(p_recurrence_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public','pg_temp'
+as $function$
+declare
+  rec record;
+  src record;
+  target record;
+  cloned_id uuid;
+  cloned_approval text;
+  next_run timestamptz;
+  next_count integer;
+  should_stop boolean;
+begin
+  if current_user not in ('service_role','postgres') then raise exception 'Операция доступна только серверу'; end if;
+
+  select * into rec from public.post_recurrences where id=p_recurrence_id for update;
+  if not found or rec.active is not true then return null; end if;
+  if rec.next_run_at is null or rec.next_run_at>now() then return null; end if;
+
+  if rec.max_runs is not null and rec.run_count>=rec.max_runs then
+    update public.post_recurrences set active=false,updated_at=now() where id=rec.id;
+    return null;
+  end if;
+
+  select id,user_id,body,media,approval_status,approval_requested_by,approval_approved_by,approval_comment
+  into src
+  from public.posts
+  where id=rec.source_post_id and workspace_id=rec.workspace_id
+  for share;
+
+  if not found then
+    update public.post_recurrences set active=false,updated_at=now() where id=rec.id;
+    return null;
+  end if;
+
+  cloned_approval:=case
+    when src.approval_status='approved' then 'approved'
+    when src.approval_status='pending' then 'pending'
+    else 'not_required'
+  end;
+
+  insert into public.posts(
+    workspace_id,user_id,body,media,status,scheduled_at,approval_status,
+    approval_requested_by,approval_approved_by,approval_comment,approval_updated_at
+  )
+  values(
+    rec.workspace_id,src.user_id,coalesce(src.body,''),coalesce(src.media,'[]'::jsonb),
+    'scheduled',rec.next_run_at,cloned_approval,
+    case when cloned_approval='pending' then src.approval_requested_by else null end,
+    case when cloned_approval='approved' then src.approval_approved_by else null end,
+    case when cloned_approval='approved' then src.approval_comment else null end,
+    case when cloned_approval<>'not_required' then now() else null end
+  )
+  returning id into cloned_id;
+
+  if cloned_approval<>'not_required' then
+    insert into public.post_approvals(
+      workspace_id,post_id,requested_by,reviewed_by,status,comment,reviewed_at
+    )
+    values(
+      rec.workspace_id,cloned_id,src.approval_requested_by,
+      case when cloned_approval='approved' then src.approval_approved_by else null end,
+      cloned_approval,src.approval_comment,
+      case when cloned_approval='approved' then now() else null end
+    );
+  end if;
+
+  for target in
+    select social_account_id,platform,publication_type
+    from public.post_targets
+    where post_id=src.id
+    order by created_at
+  loop
+    insert into public.post_targets(post_id,social_account_id,platform,publication_type,status)
+    values(cloned_id,target.social_account_id,target.platform,coalesce(target.publication_type,'feed'),'pending');
+  end loop;
+
+  next_run:=rec.next_run_at+(rec.interval_days*interval '1 day');
+  next_count:=coalesce(rec.run_count,0)+1;
+  should_stop:=(rec.max_runs is not null and next_count>=rec.max_runs)
+    or (rec.end_at is not null and next_run>rec.end_at);
+
+  update public.post_recurrences
+  set run_count=next_count,next_run_at=next_run,active=not should_stop,updated_at=now()
+  where id=rec.id;
+
+  return cloned_id;
+end;
+$function$;
+
+revoke all on function public.create_recurrence_instance(uuid) from public,anon,authenticated;
+grant execute on function public.create_recurrence_instance(uuid) to service_role;
