@@ -303,7 +303,7 @@ export default function AccountsPage(){
               <code>{telegramServiceMode==='channel'?'/connect '+telegramConnect.code:'/start '+telegramConnect.code}</code>
               <small>{telegramConnect.instructions}</small>
             </div>}
-          </div>          {platform==='max'&&<div className="max-connect-choice">
+          </div>}          {platform==='max'&&<div className="max-connect-choice">
             <div className="connection-method-heading"><strong>Способ подключения MAX</strong><small>Выберите один из двух вариантов</small></div>
             <div className="max-method-tabs">
               <button className={maxMode==='token'?'max-method active':'max-method'} onClick={()=>setMaxMode('token')}><strong>1. Токен вашего MAX-бота</strong><small>Вы создаёте бота и вводите его токен.</small></button>
@@ -352,7 +352,7 @@ export default function AccountsPage(){
             <button className="primary" disabled={busy} onClick={()=>void startMaxServiceBot()}>{busy?'Готовим…':'Получить код подключения'}</button>
             {maxConnect&&<div className="max-connect-code"><strong>Код: {maxConnect.code}</strong><span>Действует до {new Date(maxConnect.expires_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><code>/connect {maxConnect.code}</code><small>{maxConnect.instructions}</small></div>}
             <div className="connect-faq-body"><p>Этот способ требует один раз настроить служебного MAX-бота и Webhook на стороне сервиса. Пользовательский токен не вводится.</p></div>
-          </div>
+          </div>}
 
           {(platform==='vk'||platform==='instagram')&&<details className="connect-faq" open><summary>Как работает вход</summary><div className="connect-faq-body"><p>Сначала открывается отдельное окно авторизации. После входа сервис получает только нужные разрешения, показывает список доступных сообществ/аккаунтов и сохраняет выбранный.</p></div></details>}
 
