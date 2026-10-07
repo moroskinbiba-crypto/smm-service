@@ -7,10 +7,10 @@ import { createClient } from '../../lib/supabase/client';
 import { workspaceRequest } from '../../lib/workspace-api';
 import { appRequest } from '../../lib/app-api';
 
-type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number };
+type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number; approvals_enabled?: boolean };
 type WorkspaceOption = Workspace;
 
-export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'recurrences' | 'competitors' | 'content' | 'notifications' | 'automation' | 'media' | 'admin'; children: ReactNode }) {
+export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'team' | 'admin'; children: ReactNode }) {
   const pathname = usePathname();
   const supabase = createClient();
   const [theme, setTheme] = useState<'light'|'dark'>('light');
@@ -18,6 +18,10 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [commentsUnread, setCommentsUnread] = useState(0);
+  const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [approvalsPending, setApprovalsPending] = useState(0);
 
   useEffect(() => {
     const saved = window.localStorage.getItem('smm-theme');
@@ -61,6 +65,33 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
     return () => { cancelled = true; };
   }, [supabase]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!authReady || !workspace) return;
+    void loadNavBadges();
+    void syncInboxInBackground();
+    const timer = window.setInterval(() => { void syncInboxInBackground(); }, 60000);
+    return () => window.clearInterval(timer);
+  }, [authReady, workspace?.workspace_id, workspace?.role]);
+
+  async function loadNavBadges() {
+    try {
+      const result = await appRequest<{comments_unread:number;notifications_unread:number;approvals_pending:number}>('nav-badges');
+      setCommentsUnread(Number(result.comments_unread ?? 0));
+      setNotificationsUnread(Number(result.notifications_unread ?? 0));
+      setApprovalsPending(Number(result.approvals_pending ?? 0));
+    } catch {}
+  }
+
+  async function syncInboxInBackground() {
+    if (!workspace || workspace.role === 'viewer') return;
+    try { await appRequest('sync-inbox'); } catch {}
+    await loadNavBadges();
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
     window.location.assign('/auth');
@@ -70,22 +101,27 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
 
   return <main className={theme==='dark'?'shell dark':'shell'}>
     <header className="topbar app-topbar">
-      <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
-      <nav className="main-nav" aria-label="Основная навигация">
+      <div className="mobile-header-left">
+        <button type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(value => !value)}>
+          <span /><span /><span />
+        </button>
+        <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
+      </div>
+      <nav className={mobileNavOpen ? 'main-nav mobile-open' : 'main-nav'} aria-label="Основная навигация">
         <Link className={active==='plan'?'nav-link active':'nav-link'} href="/">План публикаций</Link>
         <Link className={active==='accounts'?'nav-link active':'nav-link'} href="/accounts">Аккаунты</Link>
-        <Link className={active==='stats'?'nav-link active':'nav-link'} href="/stats">Статистика</Link>
-        <Link className={active==='inbox'?'nav-link active':'nav-link'} href="/inbox">Входящие</Link>
-        <Link className={active==='approvals'?'nav-link active':'nav-link'} href="/approvals">Согласование</Link>
-        <Link className={active==='recurrences'?'nav-link active':'nav-link'} href="/recurrences">Повторы</Link>
-        <Link className={active==='competitors'?'nav-link active':'nav-link'} href="/competitors">Конкуренты</Link>
-        <Link className={active==='content'?'nav-link active':'nav-link'} href="/content">Контент</Link>
-        <Link className={active==='notifications'?'nav-link active':'nav-link'} href="/notifications">Уведомления</Link>
-        <Link className={active==='automation'?'nav-link active':'nav-link'} href="/automation">Автоматизация</Link>
-        <Link className={active==='media'?'nav-link active':'nav-link'} href="/media">Медиа</Link>
-        {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Админ</Link>}
+        <Link className={active==='stats'?'nav-link active':'nav-link'} href="/stats">Аналитика</Link>
+        <Link className={active==='inbox'?'nav-link active':'nav-link'} href="/inbox">Комментарии{commentsUnread>0&&<span className="nav-badge">{commentsUnread>99?'99+':commentsUnread}</span>}</Link>
+        {workspace?.approvals_enabled===true&&<Link className={active==='approvals'?'nav-link active':'nav-link'} href="/approvals">Согласование{approvalsPending>0&&<span className="nav-badge">{approvalsPending>99?'99+':approvalsPending}</span>}</Link>}
+        <Link className={active==='team'?'nav-link active':'nav-link'} href="/team">Команда</Link>
+        {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Пользователи</Link>}
       </nav>
+      {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Закрыть меню" onClick={() => setMobileNavOpen(false)} />}
       <div className="top-actions">
+        <Link className="notification-bell" href="/stats#notifications-banner" aria-label="Уведомления">
+          <span aria-hidden="true">🔔</span>
+          {notificationsUnread>0&&<span className="notification-badge">{notificationsUnread>99?'99+':notificationsUnread}</span>}
+        </Link>
         <select
           className="workspace-switcher"
           value={workspace?.workspace_id || ''}
@@ -109,10 +145,9 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
       </div>
     </header>
     <div key={pathname} className="app-page-transition">{children}</div>
-    <a className="floating-contact" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться в Telegram" title="Связаться в Telegram">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M21.7 3.5 18.4 20c-.25 1.2-.9 1.5-1.8.95l-5-3.7-2.4 2.3c-.27.27-.5.5-1.03.5l.36-5.1 9.28-8.38c.4-.36-.09-.56-.62-.2L5.7 13.06.8 11.53c-1.07-.34-1.1-1.08.22-1.58L20.2 2.82c.86-.31 1.61.2 1.5.68Z" />
-      </svg>
+    <a className="floating-author" href="https://t.me/truegromle" target="_blank" rel="noreferrer" aria-label="Связаться с автором @truegromle" title="Связаться с автором @truegromle">
+      <span className="floating-author-avatar">TG</span>
+      <span className="floating-author-label">@truegromle</span>
     </a>
   </main>;
 }
