@@ -105,20 +105,16 @@ Deno.serve(async (req: Request) => {
         let enriched = data ?? [];
         if (workspaceId) {
           const { data: memberRows, error: memberError } = await admin.from("workspace_members")
-            .select("user_id,invited_by")
+            .select("user_id,invited_by,member_suspended_at,member_suspended_reason")
             .eq("workspace_id", workspaceId);
           if (memberError) throw memberError;
-          const { data: profiles, error: profilesError } = await admin.from("profiles")
-            .select("id,suspended_at,suspended_reason")
-            .in("id", (memberRows ?? []).map((row:any)=>row.user_id));
-          if (profilesError) throw profilesError;
           const invitedBy = new Map((memberRows ?? []).map((row:any)=>[row.user_id,row.invited_by]));
-          const profileMap = new Map((profiles ?? []).map((row:any)=>[row.id,row]));
+          const memberState = new Map((memberRows ?? []).map((row:any)=>[row.user_id,row]));
           enriched = enriched.map((row:any)=>({
             ...row,
             invited_by: invitedBy.get(row.user_id) ?? null,
-            suspended_at: profileMap.get(row.user_id)?.suspended_at ?? null,
-            suspended_reason: profileMap.get(row.user_id)?.suspended_reason ?? null,
+            suspended_at: memberState.get(row.user_id)?.member_suspended_at ?? null,
+            suspended_reason: memberState.get(row.user_id)?.member_suspended_reason ?? null,
           }));
         }
         return json({ ok: true, members: enriched });
