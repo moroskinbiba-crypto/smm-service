@@ -346,3 +346,6 @@
  .workspace-switcher{min-width:170px;max-width:220px}
  .account-group-checks{grid-template-columns:1fr}
 }
+
+.telegram-notify-explainer{margin-top:14px;display:grid;gap:7px;padding:14px;border:1px solid #e1e4ea;border-radius:14px;background:#f7f8fb;font-size:12px;line-height:1.5}.telegram-notify-explainer strong{font-size:13px}.telegram-notify-explainer span,.telegram-notify-explainer small{opacity:.68}.telegram-notify-explainer small{margin-top:2px}.dark .telegram-notify-explainer{border-color:#2a2e38;background:#20242c}
+.telegram-feature-card{display:grid;gap:4px;padding:13px;border:1px solid #e1e4ea;border-radius:14px;background:#f7f8fb}.telegram-feature-card strong{font-size:13px}.telegram-feature-card small{opacity:.65;line-height:1.45}.telegram-story-notice{display:grid;gap:6px;margin-top:14px;padding:13px;border:1px dashed #cfd4dd;border-radius:14px;font-size:12px;line-height:1.5}.telegram-story-notice strong{font-size:13px}.telegram-story-notice span,.telegram-story-notice small{opacity:.68}.dark .telegram-feature-card{background:#20242c;border-color:#2a2e38}.dark .telegram-story-notice{border-color:#3b404a}
