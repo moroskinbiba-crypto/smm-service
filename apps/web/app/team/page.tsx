@@ -123,7 +123,7 @@ export default function TeamPage() {
   const activeInvites = useMemo(() => invites.filter(item => !item.used_at && new Date(item.expires_at) > new Date()), [invites]);
 
   return (
-    <AppShell active="plan">
+    <AppShell active="team">
       <section className="page-section team-page">
         <div className="page-heading">
           <div><div className="eyebrow">КОМАНДА</div><h1>{workspace?.workspace_name ?? 'Рабочее пространство'}</h1><p>Управление участниками и приглашениями.</p></div>
@@ -138,6 +138,29 @@ export default function TeamPage() {
               <input className="workspace-limit-input" type="number" min="1" max="10000" value={limit} onChange={e=>setLimit(e.target.value)} />
               <button className="primary" disabled={limitBusy} onClick={()=>void saveLimit()}>{limitBusy?'Сохраняем…':'Сохранить'}</button>
             </div>
+          </section>}
+          {workspace && (workspace.role === 'owner' || workspace.role === 'admin') && workspace.workspace_kind === 'team' && <section className="card">
+            <div className="card-head"><h2>Согласование публикаций</h2><span>{workspace.approvals_enabled ? 'Включено' : 'Выключено'}</span></div>
+            <p className="section-copy">Когда режим включён, запланированные публикации проходят через согласующего до отправки. По умолчанию функция выключена.</p>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={workspace.approvals_enabled === true}
+                onChange={async event => {
+                  const enabled = event.target.checked;
+                  setMessage('');
+                  try {
+                    const result = await workspaceRequest<{approvals_enabled:boolean}>('set-approval-mode',{enabled});
+                    setWorkspace(prev=>prev?{...prev,approvals_enabled:result.approvals_enabled}:prev);
+                    setMessage(enabled ? 'Согласование включено.' : 'Согласование выключено. Ожидающие запросы закрыты.');
+                  } catch (e) {
+                    setMessage(e instanceof Error ? e.message : 'Не удалось изменить режим согласования');
+                  }
+                }}
+              />
+              <span className="settings-toggle-track" aria-hidden="true"><span /></span>
+              <span className="settings-toggle-label">{workspace.approvals_enabled ? 'Публикации требуют согласования' : 'Публикации выходят без согласования'}</span>
+            </label>
           </section>}
           <section className="card">
             <div className="card-head"><h2>Участники</h2><span>{members.length}{workspace?.max_members ? ' / ' + workspace.max_members : ''}</span></div>
