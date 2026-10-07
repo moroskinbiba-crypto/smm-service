@@ -7,6 +7,7 @@ export type ApiPost = {
   body: string;
   media: Array<{ path: string; name?: string; type?: string; size?: number; order?: number; signed_url?: string | null }>;
   status: string;
+  approval_status: 'not_required' | 'pending' | 'approved' | 'rejected';
   scheduled_at: string | null;
   created_at: string;
   post_targets: Array<{
