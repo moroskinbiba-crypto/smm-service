@@ -86,8 +86,6 @@ async function claimChannel(admin: any, update: any, code: string, token: string
     }).eq("id", accountId);
   }
 
-  await admin.rpc("upsert_social_account_secret", { p_social_account_id: accountId, p_access_token: token });
-
   const { data: updated, error: updateError } = await admin.from("social_accounts").update({
     status: "connected",
     last_error: null,
@@ -261,8 +259,6 @@ async function claimBusinessConnection(admin: any, update: any, token: string, b
     }).eq("id", accountId);
   }
 
-  await admin.rpc("upsert_social_account_secret", { p_social_account_id: accountId, p_access_token: token });
-
   await admin.from("telegram_business_connections").upsert({
     connection_id: String(connection.id),
     workspace_id: request.workspace_id,
@@ -303,7 +299,8 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return response({ ok: false, error: "Method not allowed" }, 405);
 
   const expected = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
-  if (expected && req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== expected) {
+  if (!expected) return response({ ok: false, error: "Telegram webhook secret is not configured" }, 500);
+  if (req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== expected) {
     return response({ ok: false, error: "Unauthorized" }, 401);
   }
 
