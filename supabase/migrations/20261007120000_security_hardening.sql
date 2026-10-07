@@ -456,3 +456,123 @@ $function$;
 
 revoke all on function public.create_recurrence_instance(uuid) from public,anon,authenticated;
 grant execute on function public.create_recurrence_instance(uuid) to service_role;
+
+ 
+drop function if exists public.list_workspace_invites_for_user(uuid);
+drop function if exists public.revoke_workspace_invite_for_user(uuid,uuid);
+
+create unique index if not exists workspace_members_one_owner_idx
+  on public.workspace_members(workspace_id)
+  where role='owner';
+
+create or replace function public.create_workspace_invite_for_user(
+  p_user_id uuid,
+  p_expires_in_hours integer,
+  p_workspace_id uuid,
+  p_role text
+)
+returns table(invite_id uuid, token text, expires_at timestamptz)
+language plpgsql
+security definer
+set search_path to 'public','extensions'
+as $function$
+declare
+ v_workspace_id uuid;
+ v_actor_role text;
+ v_workspace_kind text;
+ v_max_members integer;
+ v_member_count integer;
+ v_pending_invites integer;
+ v_token text;
+ v_invite_id uuid;
+ v_expires_at timestamptz;
+begin
+ select x.workspace_id,x.role,x.workspace_kind,x.max_members
+ into v_workspace_id,v_actor_role,v_workspace_kind,v_max_members
+ from public.get_workspace_for_user(p_user_id,p_workspace_id) x
+ limit 1;
+ if v_workspace_id is null or v_actor_role not in ('owner','admin') then
+   raise exception 'Создавать приглашения может только руководитель';
+ end if;
+ perform 1 from public.workspaces where id=v_workspace_id for update;
+ if p_expires_in_hours<1 or p_expires_in_hours>720 then raise exception 'Invalid invitation lifetime'; end if;
+ if p_role not in ('editor','publisher','approver','viewer','admin') then raise exception 'Invalid invitation role'; end if;
+ if v_workspace_kind='personal' then
+   update public.workspaces
+   set workspace_kind='team',max_members=greatest(max_members,10),updated_at=now()
+   where id=v_workspace_id;
+   v_max_members=greatest(v_max_members,10);
+ end if;
+ select count(*) into v_member_count from public.workspace_members where workspace_id=v_workspace_id;
+ select count(*) into v_pending_invites
+ from public.workspace_invites where workspace_id=v_workspace_id and used_at is null and expires_at>now();
+ if v_member_count+v_pending_invites>=v_max_members then raise exception 'Лимит участников команды достигнут'; end if;
+ if p_role='admin' and v_actor_role<>'owner' then raise exception 'Только владелец может приглашать администраторов'; end if;
+ v_token=encode(gen_random_bytes(32),'hex');
+ v_expires_at=now()+make_interval(hours=>p_expires_in_hours);
+ insert into public.workspace_invites(workspace_id,created_by,token_hash,role,expires_at)
+ values(v_workspace_id,p_user_id,extensions.digest(v_token,'sha256'),p_role,v_expires_at)
+ returning id into v_invite_id;
+ return query select v_invite_id,v_token,v_expires_at;
+end;
+$function$;
+
+create or replace function public.accept_workspace_invite_for_user(
+  p_user_id uuid,
+  p_token text
+)
+returns table(workspace_id uuid,workspace_name text,workspace_timezone text,role text)
+language plpgsql
+security definer
+set search_path to 'public','extensions'
+as $function$
+declare
+ v_hash bytea;
+ v_workspace_id uuid;
+ v_workspace_name text;
+ v_workspace_timezone text;
+ v_role text;
+ v_inviter uuid;
+ v_expires_at timestamptz;
+ v_used_at timestamptz;
+ v_max_members integer;
+ v_member_count integer;
+ v_personal_workspace_id uuid;
+begin
+ if p_user_id is null then raise exception 'User is required'; end if;
+ v_hash := extensions.digest(trim(p_token), 'sha256');
+ select wi.workspace_id,wi.role,wi.created_by,wi.expires_at,wi.used_at
+ into v_workspace_id,v_role,v_inviter,v_expires_at,v_used_at
+ from public.workspace_invites wi
+ where wi.token_hash=v_hash
+ for update;
+ if v_workspace_id is null then raise exception 'Invitation not found'; end if;
+ if v_used_at is not null then raise exception 'Invitation has already been used'; end if;
+ if v_expires_at<=now() then raise exception 'Invitation has expired'; end if;
+ select max_members into v_max_members
+ from public.workspaces where id=v_workspace_id for update;
+ select count(*) into v_member_count from public.workspace_members where workspace_id=v_workspace_id;
+ if v_member_count>=coalesce(v_max_members,10) then raise exception 'Лимит участников команды достигнут'; end if;
+ if exists(select 1 from public.workspace_members where workspace_id=v_workspace_id and user_id=p_user_id) then
+   raise exception 'You are already a member of this workspace';
+ end if;
+ v_personal_workspace_id := public.ensure_personal_workspace_for_user(p_user_id);
+ select w.name,w.timezone into v_workspace_name,v_workspace_timezone from public.workspaces w where w.id=v_workspace_id;
+ insert into public.workspace_members(workspace_id,user_id,role,invited_by)
+ values(v_workspace_id,p_user_id,v_role,v_inviter);
+ insert into public.profiles(id,workspace_id,timezone)
+ values(p_user_id,v_personal_workspace_id,v_workspace_timezone)
+ on conflict(id) do update
+ set workspace_id=coalesce(public.profiles.workspace_id,excluded.workspace_id),updated_at=now();
+ update public.workspace_invites set used_at=now(),used_by=p_user_id where token_hash=v_hash and used_at is null;
+ return query select v_workspace_id,v_workspace_name,v_workspace_timezone,v_role;
+end;
+$function$;
+
+revoke all on function public.create_workspace_invite_for_user(uuid,integer,uuid,text) from public,anon,authenticated;
+grant execute on function public.create_workspace_invite_for_user(uuid,integer,uuid,text) to service_role;
+revoke all on function public.accept_workspace_invite_for_user(uuid,text) from public,anon,authenticated;
+grant execute on function public.accept_workspace_invite_for_user(uuid,text) to service_role;
+
+drop function if exists public.create_workspace_invite_for_user(uuid,integer);
+drop function if exists public.get_workspace_for_user(uuid);
