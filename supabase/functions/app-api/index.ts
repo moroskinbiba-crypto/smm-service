@@ -392,7 +392,8 @@ async function fetchCompetitorSnapshot(ctx: any, competitor: any) {
   const account = accounts?.[0];
   if (!account) throw new Error("Для " + competitor.platform + " нужен хотя бы один подключённый аккаунт этой площадки");
 
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   if (competitor.platform === "vk") {
     if (!secret?.access_token) throw new Error("VK token не найден");
     const groupId = String(competitor.external_ref).replace(/^-/, "");
@@ -558,7 +559,8 @@ async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
 }
 
 async function syncAccountInbox(ctx: any, account: any) {
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
   let result: { items: InboxItem[]; metadata_patch?: Record<string, unknown> } = { items: [] };
 
@@ -646,7 +648,8 @@ async function sendInboxMessage(ctx: any, threadId: string, body: string) {
   if (!thread) throw new Error("Диалог не найден");
 
   const account = await accountRow(ctx.admin, thread.social_account_id, ctx.workspace.workspace_id);
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   let sent: any;
 
   const { data: latestInbound, error: latestInboundError } = await ctx.admin.from("inbox_messages")
@@ -1324,7 +1327,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: token });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("max", secret ?? {}, chatId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1502,7 +1506,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("vk", secret ?? {}, groupId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1545,7 +1550,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("instagram", secret ?? {}, instagramId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1591,7 +1597,8 @@ Deno.serve(async (req: Request) => {
               p_expires_at: body.token_expires_at ? new Date(body.token_expires_at).toISOString() : null,
               p_client_secret: body.client_secret || null,
             });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck(platform as Platform, secret ?? {}, externalId, metadata);
             const nextMetadata = checked?.metadata_patch ? { ...metadata, ...checked.metadata_patch } : metadata;
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
