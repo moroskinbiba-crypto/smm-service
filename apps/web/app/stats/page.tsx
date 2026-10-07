@@ -134,16 +134,16 @@ export default function StatsPage() {
     ['Опубликовано', number(summary.published), 'успешных публикаций'],
     ['Запланировано', number(summary.scheduled), 'сейчас в очереди'],
     ['Ошибки', number(summary.failed), 'публикаций с ошибкой'],
-    ['Просмотры', number(summary.views), 'суммарный охват'],
-    ['Лайки', number(summary.likes), 'реакции'],
-    ['Комментарии', number(summary.comments), 'комментарии'],
-    ['Репосты', number(summary.reposts), 'репосты'],
-    ['Клики', number(summary.clicks), 'клики по доступным метрикам'],
-    ['CTR', percent(summary.ctr), 'клики / просмотры'],
-    ['Вовлечённость', number(summary.engagement), 'лайки + комментарии + репосты'],
-    ['ER по просмотрам', percent(summary.engagement_rate), 'вовлечённость / просмотры'],
-    ['Средние просмотры', number(summary.avg_views_per_post), 'на опубликованный target'],
-    ['Успешность публикаций', percent(summary.success_rate), 'успешные / успешные + ошибки'],
+    ['Просмотры (Views)', number(summary.views), 'суммарные просмотры / охват'],
+    ['Лайки (Likes)', number(summary.likes), 'реакции'],
+    ['Комментарии (Comments)', number(summary.comments), 'комментарии'],
+    ['Репосты (Shares)', number(summary.reposts), 'репосты'],
+    ['Клики (Clicks)', number(summary.clicks), 'клики по доступным метрикам'],
+    ['CTR (Click-Through Rate)', percent(summary.ctr), 'клики / просмотры'],
+    ['Engagement', number(summary.engagement), 'лайки + комментарии + репосты'],
+    ['ER (Engagement Rate)', percent(summary.engagement_rate), 'вовлечённость / просмотры — формула без изменений'],
+    ['Average Views', number(summary.avg_views_per_post), 'среднее число просмотров на опубликованный target'],
+    ['Success Rate', percent(summary.success_rate), 'успешные / успешные + ошибки'],
     ['Reels', number(summary.reels), 'опубликовано'],
     ['VK Клипы', number(summary.clips), 'опубликовано'],
   ] : [];
@@ -280,7 +280,7 @@ export default function StatsPage() {
         <section className="card stats-benchmark">
           <div className="card-head"><h2>Benchmark внутри команды</h2><span>сравнение подключённых аккаунтов</span></div>
           <div className="stats-table stats-table-wide">
-            <div className="stats-row stats-head"><span>Аккаунт</span><span>Площадка</span><span>Посты</span><span>Средние просмотры</span><span>ER</span><span>Успешность</span><span>Место</span></div>
+            <div className="stats-row stats-head"><span>Аккаунт</span><span>Площадка</span><span>Posts</span><span>Средние просмотры</span><span>ER (Engagement Rate)</span><span>Success Rate</span><span>Место</span></div>
             {benchmarkAccounts.map(account=><div className="stats-row" key={account.account_id}><span><strong>{account.name}</strong></span><span>{platformNames[account.platform] ?? account.platform}</span><span>{number(account.published)}</span><span>{number(account.avg_views)}</span><span>{percent(account.engagement_rate)}</span><span>{percent(account.success_rate)}</span><span>#{account.rank}</span></div>)}
             {!benchmarkAccounts.length&&<div className="empty small-empty">Нужно несколько подключённых аккаунтов и публикаций для benchmark.</div>}
           </div>
