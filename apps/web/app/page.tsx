@@ -73,8 +73,11 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
       const selectedText=source.slice(start,end).trim();
       if(selectedText) url=selectedText;
     }
-    if(!url) url=window.prompt('URL для UTM','https://');
-    if(!url)return;
+    if(!url){
+      const entered=window.prompt('URL для UTM','https://');
+      if(!entered)return;
+      url=entered;
+    }
     try{
       const u=new URL(url);
       if(utmSource)u.searchParams.set('utm_source',utmSource);
@@ -134,7 +137,7 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
   {selected.includes(a.id)&&<select className="publication-type-select" value={publicationTypes[a.id]||'feed'} onChange={e=>setPublicationTypes(v=>({...v,[a.id]:e.target.value as any}))}>
     <option value="feed">Пост</option>
     {a.platform==='instagram'&&String(a.metadata?.account_type||'').toUpperCase()==='BUSINESS'&&<option value="story">Сторис</option>}
-    {a.platform==='telegram'&&a.metadata?.business_connection_id&&<option value="story">Сторис</option>}
+    {a.platform==='telegram'&&typeof a.metadata?.business_connection_id==='string'&&<option value="story">Сторис</option>}
     {a.platform==='instagram'&&<option value="reel">Reels</option>}
     {a.platform==='vk'&&<option value="clip">Клип</option>}
   </select>}
