@@ -1,4 +1,4 @@
-# Архитектура SMM Service
+# Архитектура TGRML posting
 
 ## Production
 - Vercel: Next.js web app.
