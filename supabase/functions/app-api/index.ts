@@ -2088,123 +2088,60 @@ Deno.serve(async (req: Request) => {
       case "request-approval":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
-          const { data: post, error } = await ctx.admin.from("posts")
-            .select("id,status,approval_status")
-            .eq("id", String(body.post_id || ""))
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .maybeSingle();
-          if (error) throw error;
-          if (!post) throw new Error("Публикация не найдена");
-          if (post.status === "publishing") throw new Error("Нельзя отправить на согласование публикацию во время отправки");
+          const postId = String(body.post_id || "");
+          if (!postId) throw new Error("Не указана публикация");
 
-          await ctx.admin.from("post_approvals")
-            .update({ status: "rejected", reviewed_at: new Date().toISOString(), comment: "Предыдущий запрос закрыт новым запросом" })
-            .eq("post_id", post.id)
-            .eq("status", "pending");
-
-          const { error: postError } = await ctx.admin.from("posts").update({
-            approval_status: "pending",
-            approval_requested_by: ctx.user.id,
-            approval_approved_by: null,
-            approval_comment: null,
-            approval_updated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq("id", post.id);
-          if (postError) throw postError;
-
-          const { error: approvalError } = await ctx.admin.from("post_approvals").insert({
-            workspace_id: ctx.workspace.workspace_id,
-            post_id: post.id,
-            requested_by: ctx.user.id,
-            status: "pending",
+          const { data: requestId, error: requestError } = await ctx.admin.rpc("request_post_approval", {
+            p_post_id: postId,
+            p_workspace_id: ctx.workspace.workspace_id,
+            p_user_id: ctx.user.id,
           });
-          if (approvalError) throw approvalError;
-          const { data: approvers, error: approverError } = await ctx.admin.from("workspace_members")
-            .select("user_id")
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .in("role", ["owner", "admin", "approver"]);
-          if (approverError) throw approverError;
+          if (requestError) throw requestError;
+
           await createWorkspaceNotifications(
             ctx,
-            (approvers ?? []).map((row:any)=>row.user_id),
-            "Новая публикация на согласование",
-            "Пользователь отправил публикацию на проверку.",
+            [ctx.user.id],
+            "Публикация отправлена на согласование",
+            "Запрос на согласование создан.",
             "approval_requested",
           );
-          await runAutomations(ctx,"approval_requested","Новая публикация на согласование","Пост отправлен на проверку.","approval_requested");
-          return json({ ok: true, approval_status: "pending" });
+          return json({ ok: true, approval_id: requestId });
         }
       case "review-approval":
         {
-          if (!["owner", "admin", "approver"].includes(ctx.workspace.role)) {
-            throw new Error("Согласовывать публикации может только руководитель или согласующий");
-          }
-          const postId = String(body.post_id || "");
           const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
           if (!decision) throw new Error("Некорректное решение");
+          const postId = String(body.post_id || "");
+          if (!postId) throw new Error("Не указана публикация");
           const comment = typeof body.comment === "string" && body.comment.trim() ? body.comment.trim() : null;
 
-          const { data: post, error: postError } = await ctx.admin.from("posts")
-            .select("id,status,approval_status")
-            .eq("id", postId)
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .maybeSingle();
-          if (postError) throw postError;
-          if (!post) throw new Error("Публикация не найдена");
-          if (post.approval_status !== "pending") throw new Error("Эта публикация больше не ожидает согласования");
+          const { data, error } = await ctx.admin.rpc("review_post_approval", {
+            p_post_id: postId,
+            p_workspace_id: ctx.workspace.workspace_id,
+            p_reviewer_id: ctx.user.id,
+            p_decision: decision,
+            p_comment: comment,
+          });
+          if (error) throw error;
 
-          const { data: pendingRequest, error: pendingRequestError } = await ctx.admin.from("post_approvals")
-            .select("id,requested_by")
-            .eq("post_id", postId)
-            .eq("status", "pending")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (pendingRequestError) throw pendingRequestError;
-          if (pendingRequest?.requested_by === ctx.user.id) throw new Error("Нельзя согласовать собственную публикацию");
-
-          const { data: approval, error: approvalLoadError } = await ctx.admin.from("post_approvals")
-            .select("id,requested_by")
-            .eq("post_id", postId)
-            .eq("status", "pending")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (approvalLoadError) throw approvalLoadError;
-
-          const { error: updatePostError } = await ctx.admin.from("posts").update({
-            approval_status: decision,
-            approval_approved_by: ctx.user.id,
-            approval_comment: comment,
-            approval_updated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq("id", postId);
-          if (updatePostError) throw updatePostError;
-
-          if (approval) {
-            const { data: requestRow } = await ctx.admin.from("post_approvals")
-              .select("requested_by")
-              .eq("id", approval.id)
-              .maybeSingle();
-            const { error: updateApprovalError } = await ctx.admin.from("post_approvals").update({
-              status: decision,
-              reviewed_by: ctx.user.id,
-              comment,
-              reviewed_at: new Date().toISOString(),
-            }).eq("id", approval.id);
-            if (updateApprovalError) throw updateApprovalError;
-            if (requestRow?.requested_by) {
-              await createWorkspaceNotifications(
-                ctx,
-                [requestRow.requested_by],
-                decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
-                comment || "Статус публикации изменён.",
-                "approval_reviewed",
-              );
-            }
+          const row = Array.isArray(data) ? data[0] : data;
+          if (row?.requested_by) {
+            await createWorkspaceNotifications(
+              ctx,
+              [row.requested_by],
+              decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
+              comment || "Статус публикации изменён.",
+              "approval_reviewed",
+            );
           }
 
-          await runAutomations(ctx,"approval_reviewed",decision === "approved" ? "Публикация согласована" : "Публикация отклонена","Согласование завершено.","approval_reviewed");
+          await runAutomations(
+            ctx,
+            "approval_reviewed",
+            decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
+            "Согласование завершено.",
+            "approval_reviewed",
+          );
           return json({ ok: true, approval_status: decision });
         }
       case "list-approval-queue":
