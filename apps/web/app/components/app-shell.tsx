@@ -30,6 +30,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
           return;
         }
 
+        await workspaceRequest<{workspace?: Workspace}>('bootstrap');
         const listResult = await workspaceRequest<{workspaces: WorkspaceOption[]}>('list-workspaces');
         const available = listResult.workspaces ?? [];
         let preferred = window.localStorage.getItem('smm-workspace-id') || '';
@@ -39,7 +40,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         }
         if (!cancelled) setWorkspaces(available);
 
-        const result = await workspaceRequest<{workspace?: Workspace}>('bootstrap');
+        const result = await workspaceRequest<{workspace?: Workspace}>('get-workspace');
         if (!cancelled && result.workspace) setWorkspace(result.workspace);
         try {
           const adminResult = await appRequest<{is_admin: boolean}>('admin-check');
