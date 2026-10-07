@@ -8,7 +8,7 @@ import { createClient } from '../../lib/supabase/client';
 
 type Member = { user_id: string; display_name: string | null; role: string; created_at: string; invited_by: string | null; suspended_at: string | null; suspended_reason: string | null };
 type Invite = { invite_id: string; expires_at: string; used_at: string | null; created_at: string; role: string };
-type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number };
+type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number; approvals_enabled?: boolean };
 
 function roleLabel(role: string) {
   return ({owner:'Владелец',admin:'Администратор',editor:'Редактор',publisher:'Публикатор',approver:'Согласующий',viewer:'Наблюдатель'} as Record<string,string>)[role] ?? role;
