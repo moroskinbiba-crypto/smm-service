@@ -171,6 +171,9 @@ Deno.serve(async (req: Request) => {
         if (!targetUserId || !["owner","admin","editor","publisher","approver","viewer"].includes(role)) {
           throw new Error("Некорректные данные роли");
         }
+        if (role === "owner") {
+          throw new Error("Передача владения командой пока выполняется отдельной операцией");
+        }
 
         const { data: actor, error: actorError } = await admin.from("workspace_members")
           .select("workspace_id,role")
