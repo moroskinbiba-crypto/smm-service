@@ -137,7 +137,6 @@ function Editor(props:{post:ApiPost|null;accounts:SocialAccount[];groups:Account
   {selected.includes(a.id)&&<select className="publication-type-select" value={publicationTypes[a.id]||'feed'} onChange={e=>setPublicationTypes(v=>({...v,[a.id]:e.target.value as any}))}>
     <option value="feed">Пост</option>
     {a.platform==='instagram'&&String(a.metadata?.account_type||'').toUpperCase()==='BUSINESS'&&<option value="story">Сторис</option>}
-    {a.platform==='telegram'&&typeof a.metadata?.business_connection_id==='string'&&<option value="story">Сторис</option>}
     {a.platform==='instagram'&&<option value="reel">Reels</option>}
     {a.platform==='vk'&&<option value="clip">Клип</option>}
   </select>}
