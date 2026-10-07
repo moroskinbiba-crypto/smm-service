@@ -142,10 +142,10 @@ export default function AccountsPage(){
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить Instagram')}finally{setBusy(false)}
   }
 
-  async function startTelegramServiceBot(mode:'channel'|'business'){
+  async function startTelegramServiceBot(mode:'channel'){
     setBusy(true);setMsg('');
     try{
-      const r=await appRequest<{mode:'channel'|'business';code:string;expires_at:string;bot_username:string;instructions:string;start_url?:string}>('telegram-service-start',{mode});
+      const r=await appRequest<{mode:'channel';code:string;expires_at:string;bot_username:string;instructions:string}>('telegram-service-start',{mode});
       setTelegramConnect(r);
       const started=Date.now();
       const code=r.code;
@@ -158,12 +158,12 @@ export default function AccountsPage(){
             account.platform === 'telegram' &&
             account.status === 'connected' &&
             ((mode === 'channel' && account.metadata?.connection_method === 'service_bot' && !account.metadata?.business_connection_id) ||
-             (mode === 'business' && account.metadata?.connection_method === 'business_bot'))
+)
           );
           if (matched && new Date(matched.updated_at).getTime() >= new Date(modeStartedAt).getTime()) {
             window.clearInterval(timer);
             setTelegramConnect(null);
-            setMsg(mode==='business'?'✅ Telegram Business подключён.':'✅ Telegram-канал подключён.');
+            setMsg('✅ Telegram-канал подключён.');
           } else if (Date.now()-started>120000) {
             window.clearInterval(timer);
           }
