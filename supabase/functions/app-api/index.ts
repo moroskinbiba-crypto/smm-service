@@ -258,6 +258,9 @@ async function savePost(ctx: any, body: any) {
     platform: account.platform,
     publication_type: typeof publicationTypes[account.id] === "string" ? publicationTypes[account.id] : "feed",
   }));
+  if (targets.some((target: any) => target.platform === "telegram" && target.publication_type === "story")) {
+    throw new Error("Stories от имени Telegram-канала требуют отдельного пользовательского Telegram API-подключения и пока не доступны через обычного бота.");
+  }
 
   const desiredStatus = body.status === "canceled" ? "canceled" : (scheduledAt ? "scheduled" : "draft");
   const { data, error } = await ctx.admin.rpc("save_post_bundle", {
