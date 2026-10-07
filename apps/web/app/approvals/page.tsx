@@ -27,6 +27,7 @@ export default function ApprovalsPage() {
   const [posts,setPosts]=useState<ApprovalPost[]>([]);
   const [role,setRole]=useState('');
   const [message,setMessage]=useState('');
+  const [enabled,setEnabled]=useState(true);
   const [busy,setBusy]=useState('');
 
   async function load() {
@@ -67,6 +68,8 @@ export default function ApprovalsPage() {
           <button className="secondary" onClick={()=>void load()}>Обновить</button>
         </div>
 
+        {!enabled && <section className="card coming-card"><div className="coming-icon">⏸</div><h2>Согласование выключено</h2><p>Руководитель может включить режим в разделе «Команда».</p></section>}
+
         {!['owner','admin','approver'].includes(role) && (
           <section className="card coming-card">
             <div className="coming-icon">🔒</div>
@@ -75,7 +78,7 @@ export default function ApprovalsPage() {
           </section>
         )}
 
-        {['owner','admin','approver'].includes(role) && (
+        {enabled && ['owner','admin','approver'].includes(role) && (
           <section className="approval-list">
             {posts.map(post=>(
               <article className="card approval-card" key={post.id}>
