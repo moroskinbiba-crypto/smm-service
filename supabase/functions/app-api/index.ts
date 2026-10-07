@@ -1194,7 +1194,10 @@ Deno.serve(async (req: Request) => {
       case "telegram-service-start":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
-          const mode = body.mode === "business" ? "business" : "channel";
+          const mode = "channel";
+          if (body.mode === "business") {
+            throw new Error("Telegram Business не используется для Stories каналов. Подключите Telegram-канал обычным способом.");
+          }
           const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
           const username = Deno.env.get("TELEGRAM_SERVICE_BOT_USERNAME") ?? "";
           const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
