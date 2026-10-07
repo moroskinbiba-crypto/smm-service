@@ -1,5 +1,5 @@
 {
-  "name": "smm-service-web",
+  "name": "tgrml-posting-web",
   "private": true,
   "scripts": {
     "dev": "next dev",
