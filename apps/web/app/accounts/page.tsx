@@ -148,13 +148,26 @@ export default function AccountsPage(){
     try{
       const r=await appRequest<{mode:'channel'|'business';code:string;expires_at:string;bot_username:string;instructions:string;start_url?:string}>('telegram-service-start',{mode});
       setTelegramConnect(r);
-      const before=accounts.length;
       const started=Date.now();
+      const code=r.code;
+      const modeStartedAt=new Date().toISOString();
       const timer=window.setInterval(async()=>{
         if(Date.now()-started>120000){window.clearInterval(timer);return}
         try{
           const list=await load();
-          if(list.length>before){window.clearInterval(timer);setMsg(mode==='business'?'✅ Telegram Business подключён.':'✅ Telegram-канал подключён.')}
+          const matched=list.find((account:any) =>
+            account.platform === 'telegram' &&
+            account.status === 'connected' &&
+            ((mode === 'channel' && account.metadata?.connection_method === 'service_bot' && !account.metadata?.business_connection_id) ||
+             (mode === 'business' && account.metadata?.connection_method === 'business_bot'))
+          );
+          if (matched && new Date(matched.updated_at).getTime() >= new Date(modeStartedAt).getTime()) {
+            window.clearInterval(timer);
+            setTelegramConnect(null);
+            setMsg(mode==='business'?'✅ Telegram Business подключён.':'✅ Telegram-канал подключён.');
+          } else if (Date.now()-started>120000) {
+            window.clearInterval(timer);
+          }
         }catch{}
       },4000);
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось запустить подключение Telegram')}finally{setBusy(false)}
