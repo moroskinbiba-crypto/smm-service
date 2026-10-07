@@ -580,3 +580,31 @@
 @media (prefers-reduced-motion: reduce){
   .mobile-nav-backdrop{transition:none}
 }
+
+
+/* Desktop navigation: keep every section visible without horizontal scrolling */
+@media (min-width: 721px){
+  .app-topbar{
+    height:auto;
+    min-height:76px;
+    padding-top:12px;
+    padding-bottom:12px;
+    flex-wrap:wrap;
+    row-gap:10px;
+  }
+  .app-topbar .mobile-header-left{display:flex;align-items:center}
+  .app-topbar .main-nav{
+    order:3;
+    flex:0 0 100%;
+    width:100%;
+    min-width:0;
+    justify-content:flex-start;
+    flex-wrap:wrap;
+    overflow:visible;
+    gap:5px;
+    padding-top:2px;
+  }
+  .app-topbar .nav-link{
+    white-space:nowrap;
+  }
+}
