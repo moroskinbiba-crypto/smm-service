@@ -274,7 +274,7 @@ export default function AccountsPage(){
               <button className={telegramMode==='own_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('own_bot')}><strong>1. Ваш Telegram-бот</strong><small>Вы создаёте и даёте сервису токен. Максимум контроля.</small></button>
               <button className={telegramMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('service_bot')}><strong>2. Бот SMM-сервиса</strong><small>Без копирования токена — подключение через одноразовый код.</small></button>
             </div>
-          </div>
+          </div>}
           {platform==='telegram'&&telegramMode==='service_bot'&&<div className="max-service-form">
             <div className="connect-method-badge">Вариант 2 · Бот SMM-сервиса</div>
             <p className="section-copy">Выберите, что хотите подключить через нашего Telegram-бота.</p>
