@@ -463,3 +463,15 @@
   .page-heading{grid-template-columns:1fr}.stats-grid,.competitor-metrics,.format-stats{grid-template-columns:1fr}
   .published-media-grid{grid-template-columns:1fr 1fr}
 }
+
+
+/* Approval queue callout on the publication plan */
+.approval-plan-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 20px;padding:16px 18px;border:1px solid #e1e4ea;border-radius:16px;background:#fff;text-decoration:none;color:inherit;box-shadow:0 12px 30px rgba(25,30,45,.06);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.approval-plan-banner:hover{transform:translateY(-1px);box-shadow:0 16px 34px rgba(25,30,45,.1);border-color:#cfd4dd}
+.approval-plan-banner-copy{display:grid;gap:4px;min-width:0}
+.approval-plan-banner-copy strong{font-size:14px;line-height:1.35}
+.approval-plan-banner-copy small{font-size:11px;opacity:.58;line-height:1.4}
+.approval-plan-banner-action{flex:none;font-size:12px;font-weight:800;white-space:nowrap}
+.dark .approval-plan-banner{background:#181b22;border-color:#2a2e38;box-shadow:none}
+.dark .approval-plan-banner:hover{border-color:#454b58}
+@media(max-width:600px){.approval-plan-banner{align-items:stretch;flex-direction:column;gap:10px;padding:14px}.approval-plan-banner-action{white-space:normal}}
