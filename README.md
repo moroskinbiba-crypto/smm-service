@@ -21,7 +21,23 @@
 9. История и ошибки
 10. Светлая/тёмная тема
 
-AI пока не входит в MVP.
+AI-помощник доступен прямо в редакторе публикации.
+
+### AI-провайдеры
+Поддерживается резервная цепочка провайдеров: Groq → Gemini → OpenRouter → OpenAI (необязательный платный fallback).
+
+Базовая бесплатная конфигурация:
+- `GROQ_API_KEY` — основной провайдер
+- `GEMINI_API_KEY` — резерв
+- `OPENROUTER_API_KEY` — дополнительный резерв
+
+Настройки моделей и порядок можно менять через secrets Edge Function:
+- `AI_PROVIDER_ORDER=groq,gemini,openrouter,openai`
+- `GROQ_MODEL=openai/gpt-oss-120b`
+- `GEMINI_MODEL=gemini-3.8-flash`
+- `OPENROUTER_MODEL=openrouter/free`
+
+Ключи AI хранятся только на стороне Supabase Edge Function и не должны попадать во frontend, GitHub или переменные `NEXT_PUBLIC_*`.
 
 ## Security
 - Workspace-based RLS

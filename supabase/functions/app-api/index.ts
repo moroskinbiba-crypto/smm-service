@@ -162,7 +162,7 @@ function effectiveSecret(account: any, stored: any) {
 function sanitizeExternalError(error: unknown) {
   let message = error instanceof Error ? error.message : String(error ?? "Неизвестная ошибка");
   message = message
-    .replace(/([?&](?:access_token|client_secret|refresh_token|token|api_key|code)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:access_token|client_secret|refresh_token|token|api_key|key|code)=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/https?:\/\/api\.telegram\.org\/bot[^/\s]+/gi, "https://api.telegram.org/bot[REDACTED]")
     .replace(/Authorization\s*:\s*[^\s]+/gi, "Authorization: [REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [REDACTED]");
@@ -456,13 +456,19 @@ async function jsonResponseForAppApi(url: string, init: RequestInit = {}) {
   return data;
 }
 
-async function aiGenerate(inputText: string, mode: string, platform?: string) {
-  const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
-  if (!apiKey) {
-    throw new Error("AI не настроен: добавьте OPENAI_API_KEY в секреты Edge Function");
-  }
+type AiProvider = "groq" | "gemini" | "openrouter" | "openai";
 
-  const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.5";
+function aiProviderOrder(): AiProvider[] {
+  const configured = (Deno.env.get("AI_PROVIDER_ORDER") ?? "groq,gemini,openrouter,openai")
+    .split(",")
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean) as AiProvider[];
+  const supported = new Set<AiProvider>(["groq","gemini","openrouter","openai"]);
+  const unique = configured.filter((provider, index) => supported.has(provider) && configured.indexOf(provider) === index);
+  return unique.length ? unique : ["groq","gemini","openrouter","openai"];
+}
+
+function aiInstructions(mode: string, platform?: string) {
   const instructions: Record<string,string> = {
     improve: "Улучши исходный текст для SMM: сделай яснее, сильнее и живее, не меняя факты. Сохрани язык исходника.",
     shorten: "Сократи текст примерно вдвое, сохранив смысл, факты и призыв к действию.",
@@ -472,9 +478,57 @@ async function aiGenerate(inputText: string, mode: string, platform?: string) {
     adapt: "Адаптируй текст под конкретную площадку, учитывая её формат и привычный стиль аудитории.",
   };
   const instruction = instructions[mode] ?? instructions.improve;
-  const platformHint = platform ? "Площадка: " + platform + "." : "";
+  const platformHint = platform ? " Площадка: " + platform + "." : "";
+  return instruction + platformHint + " Не добавляй пояснения о своей работе. Верни только готовый результат.";
+}
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+async function fetchAiJson(url: string, init: RequestInit, provider: AiProvider) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const raw = await response.text();
+    let data: any = {};
+    try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+    if (!response.ok) {
+      const message = data?.error?.message
+        || data?.error?.status
+        || data?.message
+        || data?.error_msg
+        || data?.description
+        || ("HTTP " + response.status);
+      const error = new Error(provider.toUpperCase() + ": " + message);
+      (error as any).status = response.status;
+      throw error;
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractChatText(data: any) {
+  const value = data?.choices?.[0]?.message?.content
+    ?? data?.choices?.[0]?.text
+    ?? data?.output_text;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function extractGeminiText(data: any) {
+  const parts = Array.isArray(data?.candidates?.[0]?.content?.parts)
+    ? data.candidates[0].content.parts
+    : [];
+  return parts.map((part: any) => typeof part?.text === "string" ? part.text : "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+async function generateWithGroq(inputText: string, instruction: string) {
+  const apiKey = Deno.env.get("GROQ_API_KEY") ?? "";
+  if (!apiKey) return null;
+  const model = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-120b";
+  const data = await fetchAiJson("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -482,25 +536,126 @@ async function aiGenerate(inputText: string, mode: string, platform?: string) {
     },
     body: JSON.stringify({
       model,
-      instructions: instruction + " " + platformHint + " Не добавляй пояснения о своей работе. Верни только готовый результат.",
+      messages: [
+        { role: "system", content: instruction },
+        { role: "user", content: inputText },
+      ],
+      max_completion_tokens: 1200,
+      temperature: 0.7,
+      reasoning_effort: "low",
+    }),
+  }, "groq");
+  const text = extractChatText(data);
+  if (!text) throw new Error("GROQ: пустой ответ модели");
+  return { text, provider: "groq" as const, model };
+}
+
+async function generateWithGemini(inputText: string, instruction: string) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY") ?? "";
+  if (!apiKey) return null;
+  const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/"
+    + encodeURIComponent(model)
+    + ":generateContent?key="
+    + encodeURIComponent(apiKey);
+  const data = await fetchAiJson(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: instruction }] },
+      contents: [{ role: "user", parts: [{ text: inputText }] }],
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.7,
+      },
+    }),
+  }, "gemini");
+  const text = extractGeminiText(data);
+  if (!text) throw new Error("GEMINI: пустой ответ модели");
+  return { text, provider: "gemini" as const, model };
+}
+
+async function generateWithOpenRouter(inputText: string, instruction: string) {
+  const apiKey = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+  if (!apiKey) return null;
+  const model = Deno.env.get("OPENROUTER_MODEL") ?? "openrouter/free";
+  const headers: Record<string,string> = {
+    "content-type": "application/json",
+    "authorization": "Bearer " + apiKey,
+    "x-title": "TGRMLposting",
+  };
+  const referer = Deno.env.get("OPENROUTER_SITE_URL") ?? "";
+  if (referer) headers["http-referer"] = referer;
+  const data = await fetchAiJson("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: instruction },
+        { role: "user", content: inputText },
+      ],
+      max_tokens: 1200,
+      temperature: 0.7,
+    }),
+  }, "openrouter");
+  const text = extractChatText(data);
+  if (!text) throw new Error("OPENROUTER: пустой ответ модели");
+  return { text, provider: "openrouter" as const, model };
+}
+
+async function generateWithOpenAI(inputText: string, instruction: string) {
+  const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+  if (!apiKey) return null;
+  const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.5";
+  const data = await fetchAiJson("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": "Bearer " + apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      instructions: instruction,
       input: inputText,
       max_output_tokens: 1200,
     }),
-  });
-
-  const raw = await response.text();
-  let data: any = {};
-  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
-  if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || "Ошибка AI API");
-  }
-  const outputText = typeof data?.output_text === "string"
-    ? data.output_text
+  }, "openai");
+  const text = typeof data?.output_text === "string"
+    ? data.output_text.trim()
     : Array.isArray(data?.output)
-      ? data.output.flatMap((item: any) => Array.isArray(item?.content) ? item.content.map((part: any) => part?.text).filter(Boolean) : []).join("\n")
+      ? data.output.flatMap((item: any) =>
+          Array.isArray(item?.content)
+            ? item.content.map((part: any) => part?.text).filter(Boolean)
+            : []
+        ).join("\n").trim()
       : "";
-  if (!outputText.trim()) throw new Error("AI не вернул текст");
-  return outputText.trim();
+  if (!text) throw new Error("OPENAI: пустой ответ модели");
+  return { text, provider: "openai" as const, model };
+}
+
+async function aiGenerate(inputText: string, mode: string, platform?: string) {
+  const instruction = aiInstructions(mode, platform);
+  const errors: string[] = [];
+
+  for (const provider of aiProviderOrder()) {
+    try {
+      const result =
+        provider === "groq" ? await generateWithGroq(inputText, instruction)
+        : provider === "gemini" ? await generateWithGemini(inputText, instruction)
+        : provider === "openrouter" ? await generateWithOpenRouter(inputText, instruction)
+        : await generateWithOpenAI(inputText, instruction);
+
+      if (result) return result;
+    } catch (error) {
+      errors.push(sanitizeExternalError(error));
+    }
+  }
+
+  if (!errors.length) {
+    throw new Error("AI не настроен. Добавьте хотя бы один ключ: GROQ_API_KEY, GEMINI_API_KEY или OPENROUTER_API_KEY.");
+  }
+  throw new Error("Все настроенные AI-провайдеры недоступны. " + errors.slice(0, 3).join(" · "));
 }
 
 async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
@@ -1878,6 +2033,12 @@ Deno.serve(async (req: Request) => {
       case "ai-generate":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const text = typeof body.text === "string" ? body.text.trim() : "";
+          const mode = typeof body.mode === "string" ? body.mode : "improve";
+          const platform = typeof body.platform === "string" ? body.platform : undefined;
+          if (!text) throw new Error("Введите исходный текст");
+          if (text.length > 12000) throw new Error("Исходный текст слишком длинный");
+
           const workspaceLimit = await ctx.admin.rpc("consume_api_rate_limit", {
             p_key: "ai-workspace:" + ctx.workspace.workspace_id,
             p_limit: 200,
@@ -1890,13 +2051,9 @@ Deno.serve(async (req: Request) => {
             const retryAfter = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
             return json({ ok: false, error: "Дневная квота AI для рабочего пространства исчерпана.", retry_at: resetAt }, 429, { "Retry-After": String(retryAfter) });
           }
-          const text = typeof body.text === "string" ? body.text.trim() : "";
-          const mode = typeof body.mode === "string" ? body.mode : "improve";
-          const platform = typeof body.platform === "string" ? body.platform : undefined;
-          if (!text) throw new Error("Введите исходный текст");
-          if (text.length > 12000) throw new Error("Исходный текст слишком длинный");
+
           const generated = await aiGenerate(text, mode, platform);
-          return json({ ok: true, text: generated, mode, platform: platform ?? null });
+          return json({ ok: true, text: generated.text, provider: generated.provider, model: generated.model, mode, platform: platform ?? null });
         }
       case "import-posts":
         {
