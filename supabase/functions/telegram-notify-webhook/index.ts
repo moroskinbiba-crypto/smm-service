@@ -22,7 +22,8 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return response({ ok: false, error: "Method not allowed" }, 405);
 
   const expected = Deno.env.get("TGRML_NOTIFY_WEBHOOK_SECRET") ?? "";
-  if (expected && req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== expected) {
+  if (!expected) return response({ ok: false, error: "Notification webhook secret is not configured" }, 500);
+  if (req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== expected) {
     return response({ ok: false, error: "Unauthorized" }, 401);
   }
 

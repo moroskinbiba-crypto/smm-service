@@ -7,6 +7,7 @@ export type ApiPost = {
   body: string;
   media: Array<{ path: string; name?: string; type?: string; size?: number; order?: number; signed_url?: string | null }>;
   status: string;
+  approval_status: 'not_required' | 'pending' | 'approved' | 'rejected';
   scheduled_at: string | null;
   created_at: string;
   post_targets: Array<{
@@ -54,8 +55,8 @@ export async function uploadMedia(workspaceId: string, file: File) {
   if (!/^(image\/(jpeg|png|webp)|video\/(mp4|quicktime|webm|x-matroska))$/.test(file.type)) {
     throw new Error('Поддерживаются JPG, PNG, WebP и видео MP4/MOV/WEBM/MKV');
   }
-  if (file.size > 250 * 1024 * 1024) {
-    throw new Error('Размер файла не должен превышать 250 МБ');
+  if (file.size > 50 * 1024 * 1024) {
+    throw new Error('Размер файла не должен превышать 50 МБ');
   }
   const safeName = file.name.replace(/[^a-zA-Z0-9а-яА-Я._-]+/g, '_');
   const path = `${workspaceId}/${crypto.randomUUID()}-${safeName}`;

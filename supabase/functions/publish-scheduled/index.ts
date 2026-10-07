@@ -8,69 +8,20 @@ function json(body: Record<string, unknown>, status = 200) {
 async function processRecurrences(admin: any) {
   const now = new Date();
   const { data: recurrences, error } = await admin.from("post_recurrences")
-    .select("id,workspace_id,source_post_id,interval_days,next_run_at,end_at,max_runs,run_count")
+    .select("id")
     .eq("active", true)
     .lte("next_run_at", now.toISOString())
     .order("next_run_at", { ascending: true })
-    .limit(20);
+    .limit(50);
   if (error) throw error;
 
   let created = 0;
   for (const recurrence of recurrences ?? []) {
-    if (recurrence.max_runs !== null && Number(recurrence.run_count) >= Number(recurrence.max_runs)) {
-      await admin.from("post_recurrences").update({ active: false, updated_at: new Date().toISOString() }).eq("id", recurrence.id);
-      continue;
-    }
-
-    const { data: source, error: sourceError } = await admin.from("posts")
-      .select("id,user_id,body,media,post_targets(social_account_id,platform,publication_type)")
-      .eq("id", recurrence.source_post_id)
-      .eq("workspace_id", recurrence.workspace_id)
-      .maybeSingle();
-    if (sourceError) throw sourceError;
-    if (!source) {
-      await admin.from("post_recurrences").update({ active: false, updated_at: new Date().toISOString() }).eq("id", recurrence.id);
-      continue;
-    }
-
-    const scheduledAt = new Date(recurrence.next_run_at).toISOString();
-    const { data: cloned, error: cloneError } = await admin.from("posts").insert({
-      workspace_id: recurrence.workspace_id,
-      user_id: source.user_id,
-      body: source.body ?? "",
-      media: source.media ?? [],
-      status: "scheduled",
-      scheduled_at: scheduledAt,
-      approval_status: "not_required",
-    }).select("id").single();
+    const { data: cloneId, error: cloneError } = await admin.rpc("create_recurrence_instance", {
+      p_recurrence_id: recurrence.id,
+    });
     if (cloneError) throw cloneError;
-
-    const targets = (source.post_targets ?? []).map((target: any) => ({
-      post_id: cloned.id,
-      social_account_id: target.social_account_id,
-      platform: target.platform,
-      publication_type: target.publication_type || "feed",
-      status: "pending",
-    }));
-    if (targets.length) {
-      const { error: targetError } = await admin.from("post_targets").insert(targets);
-      if (targetError) throw targetError;
-    }
-
-    const nextRun = new Date(new Date(recurrence.next_run_at).getTime() + Number(recurrence.interval_days) * 86400000);
-    const nextCount = Number(recurrence.run_count) + 1;
-    const shouldStop =
-      (recurrence.max_runs !== null && nextCount >= Number(recurrence.max_runs)) ||
-      (recurrence.end_at && nextRun.getTime() > new Date(recurrence.end_at).getTime());
-
-    await admin.from("post_recurrences").update({
-      run_count: nextCount,
-      next_run_at: nextRun.toISOString(),
-      active: !shouldStop,
-      updated_at: new Date().toISOString(),
-    }).eq("id", recurrence.id);
-
-    created++;
+    if (cloneId) created++;
   }
   return created;
 }
@@ -101,15 +52,13 @@ Deno.serve(async (req: Request) => {
     runId = runRow?.id ?? null;
 
     const created = await processRecurrences(supabase);
-    const { data: recovered, error: recoverError } = await supabase.rpc("recover_stale_publication_targets", { p_limit: 200 });
-    if (recoverError) throw recoverError;
-    const { data: queued, error: queueError } = await supabase.rpc("enqueue_publication_jobs", { p_limit: 300 });
-    if (queueError) throw queueError;
 
-    const payload = { ok: true, enabled: true, created_recurrences: created, queued: Number(queued ?? 0), recovered: Number(recovered ?? 0) };
+    const payload = { ok: true, enabled: true, created_recurrences: created, queued: 0, recovered: 0 };
     if (runId) await supabase.from("scheduler_runs").update({
-      status: "success", finished_at: new Date().toISOString(), duration_ms: Date.now() - started,
-      queued: Number(queued ?? 0), recovered: Number(recovered ?? 0), details: payload,
+      status: "success",
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - started,
+      details: payload,
     }).eq("id", runId);
     return json(payload);
   } catch (error) {

@@ -148,13 +148,26 @@ export default function AccountsPage(){
     try{
       const r=await appRequest<{mode:'channel'|'business';code:string;expires_at:string;bot_username:string;instructions:string;start_url?:string}>('telegram-service-start',{mode});
       setTelegramConnect(r);
-      const before=accounts.length;
       const started=Date.now();
+      const code=r.code;
+      const modeStartedAt=new Date().toISOString();
       const timer=window.setInterval(async()=>{
         if(Date.now()-started>120000){window.clearInterval(timer);return}
         try{
           const list=await load();
-          if(list.length>before){window.clearInterval(timer);setMsg(mode==='business'?'✅ Telegram Business подключён.':'✅ Telegram-канал подключён.')}
+          const matched=list.find((account:any) =>
+            account.platform === 'telegram' &&
+            account.status === 'connected' &&
+            ((mode === 'channel' && account.metadata?.connection_method === 'service_bot' && !account.metadata?.business_connection_id) ||
+             (mode === 'business' && account.metadata?.connection_method === 'business_bot'))
+          );
+          if (matched && new Date(matched.updated_at).getTime() >= new Date(modeStartedAt).getTime()) {
+            window.clearInterval(timer);
+            setTelegramConnect(null);
+            setMsg(mode==='business'?'✅ Telegram Business подключён.':'✅ Telegram-канал подключён.');
+          } else if (Date.now()-started>120000) {
+            window.clearInterval(timer);
+          }
         }catch{}
       },4000);
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось запустить подключение Telegram')}finally{setBusy(false)}
@@ -261,7 +274,7 @@ export default function AccountsPage(){
               <button className={telegramMode==='own_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('own_bot')}><strong>1. Ваш Telegram-бот</strong><small>Вы создаёте и даёте сервису токен. Максимум контроля.</small></button>
               <button className={telegramMode==='service_bot'?'max-method active':'max-method'} onClick={()=>setTelegramMode('service_bot')}><strong>2. Бот SMM-сервиса</strong><small>Без копирования токена — подключение через одноразовый код.</small></button>
             </div>
-          </div>
+          </div>}
           {platform==='telegram'&&telegramMode==='service_bot'&&<div className="max-service-form">
             <div className="connect-method-badge">Вариант 2 · Бот SMM-сервиса</div>
             <p className="section-copy">Выберите, что хотите подключить через нашего Telegram-бота.</p>
@@ -290,7 +303,7 @@ export default function AccountsPage(){
               <code>{telegramServiceMode==='channel'?'/connect '+telegramConnect.code:'/start '+telegramConnect.code}</code>
               <small>{telegramConnect.instructions}</small>
             </div>}
-          </div>          {platform==='max'&&<div className="max-connect-choice">
+          </div>}          {platform==='max'&&<div className="max-connect-choice">
             <div className="connection-method-heading"><strong>Способ подключения MAX</strong><small>Выберите один из двух вариантов</small></div>
             <div className="max-method-tabs">
               <button className={maxMode==='token'?'max-method active':'max-method'} onClick={()=>setMaxMode('token')}><strong>1. Токен вашего MAX-бота</strong><small>Вы создаёте бота и вводите его токен.</small></button>
@@ -301,14 +314,13 @@ export default function AccountsPage(){
           {platform!=='vk'&&platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&<>
             <p className="section-copy">{meta[platform].help}</p>
             <label>Токен доступа<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Вставьте токен"/></label>
-            <label>{platform==='telegram'?'Chat ID / @username':platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder={platform==='telegram'?'@my_channel':'Например, 123456789'}/></label>
+            <label>{platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
 
             {platform==='ok'&&<><label>Application key<input value={appKey} onChange={e=>setAppKey(e.target.value)}/></label><label>Application secret<input type="password" value={appSecret} onChange={e=>setAppSecret(e.target.value)}/></label></>}
             <label>Название в сервисе<input value={name} onChange={e=>setName(e.target.value)} placeholder={meta[platform].name}/></label>
             <details className="connect-faq" open>
               <summary>FAQ: как подключить {meta[platform].name}</summary>
               <div className="connect-faq-body">
-                {platform==='telegram'&&<><p><strong>1.</strong> Создайте бота через @BotFather.</p><p><strong>2.</strong> Добавьте его в канал/чат и дайте права администратора.</p><p><strong>3.</strong> Укажите chat_id или @username.</p><p><strong>Stories:</strong> Business connection ID нужен только для Stories от имени подключённого Telegram Business аккаунта.</p><a href="https://core.telegram.org/bots/api" target="_blank" rel="noreferrer">Официальная документация Telegram →</a></>}
                 {platform==='ok'&&<><p>Используйте OAuth access token, application key/secret и ID группы.</p><a href="https://apiok.ru/" target="_blank" rel="noreferrer">Официальная документация OK →</a></>}
                 {platform==='max'&&<><p>Создайте MAX business-бота, получите токен и добавьте бота администратором в канал.</p><a href="https://dev.max.ru/docs-api" target="_blank" rel="noreferrer">Официальная документация MAX →</a></>}
               </div>
@@ -339,7 +351,7 @@ export default function AccountsPage(){
             <button className="primary" disabled={busy} onClick={()=>void startMaxServiceBot()}>{busy?'Готовим…':'Получить код подключения'}</button>
             {maxConnect&&<div className="max-connect-code"><strong>Код: {maxConnect.code}</strong><span>Действует до {new Date(maxConnect.expires_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><code>/connect {maxConnect.code}</code><small>{maxConnect.instructions}</small></div>}
             <div className="connect-faq-body"><p>Этот способ требует один раз настроить служебного MAX-бота и Webhook на стороне сервиса. Пользовательский токен не вводится.</p></div>
-          </div>
+          </div>}
 
           {(platform==='vk'||platform==='instagram')&&<details className="connect-faq" open><summary>Как работает вход</summary><div className="connect-faq-body"><p>Сначала открывается отдельное окно авторизации. После входа сервис получает только нужные разрешения, показывает список доступных сообществ/аккаунтов и сохраняет выбранный.</p></div></details>}
 

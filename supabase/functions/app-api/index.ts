@@ -67,6 +67,19 @@ async function authContext(req: Request) {
   if (error) throw error;
   const workspace = Array.isArray(data) ? data[0] : data;
   if (!workspace?.workspace_id) throw new Error("Рабочее пространство не настроено");
+
+  const { data: memberState, error: memberStateError } = await base.admin.from("workspace_members")
+    .select("member_suspended_at,member_suspended_reason")
+    .eq("workspace_id", workspace.workspace_id)
+    .eq("user_id", base.user.id)
+    .maybeSingle();
+  if (memberStateError) throw memberStateError;
+  if (memberState?.member_suspended_at) {
+    throw Object.assign(
+      new Error(memberState.member_suspended_reason || "Участие в этом рабочем пространстве приостановлено"),
+      { status: 403 },
+    );
+  }
   return { ...base, workspace };
 }
 
@@ -93,10 +106,12 @@ function canManageAccounts(role: string) {
   return ["owner", "admin"].includes(role);
 }
 
-async function signedMedia(admin: any, media: unknown) {
+async function signedMedia(admin: any, media: unknown, workspaceId: string) {
   const items = Array.isArray(media) ? media : [];
+  const prefix = workspaceId + "/";
   return Promise.all(items.map(async (raw: any, index) => {
     const path = typeof raw?.path === "string" ? raw.path : "";
+    if (path && !path.startsWith(prefix)) throw new Error("Недопустимый путь к медиафайлу");
     let signed_url: string | null = null;
     if (path) {
       const { data } = await admin.storage.from("media").createSignedUrl(path, 3600);
@@ -113,10 +128,11 @@ async function signedMedia(admin: any, media: unknown) {
   }));
 }
 
-async function deleteStoredMedia(admin: any, media: unknown) {
+async function deleteStoredMedia(admin: any, media: unknown, workspaceId: string) {
+  const prefix = workspaceId + "/";
   const paths = (Array.isArray(media) ? media : [])
     .map((item: any) => typeof item?.path === "string" ? item.path : "")
-    .filter(Boolean);
+    .filter((path: string) => path.startsWith(prefix));
 
   if (!paths.length) return;
   await admin.storage.from("media").remove(paths);
@@ -126,6 +142,59 @@ async function getSecret(admin: any, accountId: string) {
   const { data, error } = await admin.rpc("get_social_account_secret", { p_social_account_id: accountId });
   if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
+}
+
+function effectiveSecret(account: any, stored: any) {
+  const method = String(account?.metadata?.connection_method ?? "");
+  if (account?.platform === "telegram" && (method === "service_bot" || method === "business_bot")) {
+    const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный Telegram-бот не настроен");
+    return { access_token: token };
+  }
+  if (account?.platform === "max" && method === "service_bot") {
+    const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный MAX-бот не настроен");
+    return { access_token: token };
+  }
+  return stored ?? {};
+}
+
+function sanitizeExternalError(error: unknown) {
+  let message = error instanceof Error ? error.message : String(error ?? "Неизвестная ошибка");
+  message = message
+    .replace(/([?&](?:access_token|client_secret|refresh_token|token|api_key|code)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/https?:\/\/api\.telegram\.org\/bot[^/\s]+/gi, "https://api.telegram.org/bot[REDACTED]")
+    .replace(/Authorization\s*:\s*[^\s]+/gi, "Authorization: [REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [REDACTED]");
+  return message.slice(0, 1000);
+}
+
+function zonedLocalDateTimeToUtc(dateText: string, timeText: string, timeZone: string) {
+  const m = dateText.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+  const t = timeText.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || !t) throw new Error("Некорректные дата или время");
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const hour = Number(t[1]), minute = Number(t[2]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    throw new Error("Некорректные дата или время");
+  }
+  const rough = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let guess = new Date(rough);
+  for (let i = 0; i < 3; i++) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(guess);
+    const map: Record<string,string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const seenUtc = Date.UTC(
+      Number(map.year), Number(map.month) - 1, Number(map.day),
+      Number(map.hour) % 24, Number(map.minute), Number(map.second),
+    );
+    guess = new Date(rough - (seenUtc - rough));
+  }
+  return guess.toISOString();
 }
 
 async function accountRow(admin: any, accountId: string, workspaceId: string) {
@@ -151,7 +220,7 @@ async function requireTargets(admin: any, workspaceId: string, ids: string[]) {
   return data;
 }
 
-function validateMedia(media: unknown) {
+function validateMedia(media: unknown, workspaceId?: string) {
   const items = Array.isArray(media) ? media : [];
   if (items.length > 10) throw new Error("В одной публикации можно добавить не более 10 медиафайлов");
   for (const item of items) {
@@ -160,8 +229,9 @@ function validateMedia(media: unknown) {
     if (!/^(image\/(jpeg|png|webp)|video\/(mp4|quicktime|webm|x-matroska))$/.test(type)) {
       throw new Error("Поддерживаются JPG, PNG, WebP и видео MP4/MOV/WEBM/MKV");
     }
-    if (size > 250 * 1024 * 1024) throw new Error("Размер файла не должен превышать 250 МБ");
+    if (size > 50 * 1024 * 1024) throw new Error("Размер файла не должен превышать 50 МБ");
     if (typeof item?.path !== "string" || !item.path) throw new Error("У медиафайла отсутствует путь");
+    if (workspaceId && !item.path.startsWith(workspaceId + "/")) throw new Error("Медиафайл не принадлежит текущему рабочему пространству");
   }
   return items;
 }
@@ -169,56 +239,39 @@ function validateMedia(media: unknown) {
 async function savePost(ctx: any, body: any) {
   if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав для публикации");
   const bodyText = typeof body.text === "string" ? body.text : "";
-  const media = validateMedia(body.media);
+  const media = validateMedia(body.media, ctx.workspace.workspace_id);
   const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null;
-  const targetAccounts = await requireTargets(ctx.admin, ctx.workspace.workspace_id, Array.isArray(body.target_account_ids) ? body.target_account_ids : []);
-
   if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now() && body.status !== "draft") {
     throw new Error("Дата и время публикации должны быть в будущем");
   }
-  const desiredStatus = body.status === "canceled" ? "canceled" : (scheduledAt ? "scheduled" : "draft");
-  const payload = {
-    workspace_id: ctx.workspace.workspace_id,
-    user_id: ctx.user.id,
-    body: bodyText,
-    media,
-    status: desiredStatus,
-    scheduled_at: scheduledAt,
-    updated_at: new Date().toISOString(),
-  };
 
-  let postId = typeof body.post_id === "string" ? body.post_id : null;
-  if (postId) {
-    const { data: existing, error: existingError } = await ctx.admin.from("posts")
-      .select("id,status")
-      .eq("id", postId)
-      .eq("workspace_id", ctx.workspace.workspace_id)
-      .maybeSingle();
-    if (existingError) throw existingError;
-    if (!existing) throw new Error("Публикация не найдена");
-    if (existing.status === "publishing") throw new Error("Нельзя изменить публикацию во время отправки");
-
-    const { error } = await ctx.admin.from("posts").update(payload).eq("id", postId);
-    if (error) throw error;
-    await ctx.admin.from("post_targets").delete().eq("post_id", postId);
-  } else {
-    const { data, error } = await ctx.admin.from("posts").insert(payload).select("id").single();
-    if (error) throw error;
-    postId = data.id;
-  }
-
-  const publicationTypes = typeof body.target_publication_types === "object" && body.target_publication_types ? body.target_publication_types : {};
-  const rows = targetAccounts.map((account: any) => ({
-    post_id: postId,
+  const targetAccounts = await requireTargets(
+    ctx.admin,
+    ctx.workspace.workspace_id,
+    Array.isArray(body.target_account_ids) ? body.target_account_ids : [],
+  );
+  const publicationTypes = typeof body.target_publication_types === "object" && body.target_publication_types
+    ? body.target_publication_types
+    : {};
+  const targets = targetAccounts.map((account: any) => ({
     social_account_id: account.id,
     platform: account.platform,
     publication_type: typeof publicationTypes[account.id] === "string" ? publicationTypes[account.id] : "feed",
-    status: desiredStatus === "scheduled" ? "pending" : "waiting",
   }));
-  const { error: targetError } = await ctx.admin.from("post_targets").insert(rows);
-  if (targetError) throw targetError;
 
-  return postId;
+  const desiredStatus = body.status === "canceled" ? "canceled" : (scheduledAt ? "scheduled" : "draft");
+  const { data, error } = await ctx.admin.rpc("save_post_bundle", {
+    p_post_id: typeof body.post_id === "string" ? body.post_id : null,
+    p_workspace_id: ctx.workspace.workspace_id,
+    p_user_id: ctx.user.id,
+    p_body: bodyText,
+    p_media: media,
+    p_status: desiredStatus,
+    p_scheduled_at: scheduledAt,
+    p_targets: targets,
+  });
+  if (error) throw error;
+  return data;
 }
 
 async function loadPosts(ctx: any, body: any) {
@@ -261,7 +314,7 @@ async function loadPosts(ctx: any, body: any) {
       })
       .map(async (post: any) => ({
         ...post,
-        media: await signedMedia(ctx.admin, post.media),
+        media: await signedMedia(ctx.admin, post.media, ctx.workspace.workspace_id),
       })),
   );
 
@@ -343,7 +396,8 @@ async function fetchCompetitorSnapshot(ctx: any, competitor: any) {
   const account = accounts?.[0];
   if (!account) throw new Error("Для " + competitor.platform + " нужен хотя бы один подключённый аккаунт этой площадки");
 
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   if (competitor.platform === "vk") {
     if (!secret?.access_token) throw new Error("VK token не найден");
     const groupId = String(competitor.external_ref).replace(/^-/, "");
@@ -509,7 +563,8 @@ async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
 }
 
 async function syncAccountInbox(ctx: any, account: any) {
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
   let result: { items: InboxItem[]; metadata_patch?: Record<string, unknown> } = { items: [] };
 
@@ -597,7 +652,8 @@ async function sendInboxMessage(ctx: any, threadId: string, body: string) {
   if (!thread) throw new Error("Диалог не найден");
 
   const account = await accountRow(ctx.admin, thread.social_account_id, ctx.workspace.workspace_id);
-  const secret = await getSecret(ctx.admin, account.id);
+  const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
   let sent: any;
 
   const { data: latestInbound, error: latestInboundError } = await ctx.admin.from("inbox_messages")
@@ -673,7 +729,7 @@ async function markInboxRead(ctx: any, threadId: string) {
 
 async function publishPost(ctx: any, postId: string) {
   const { data: post, error: postError } = await ctx.admin.from("posts")
-    .select("id,body,media,status,workspace_id,post_targets(id,social_account_id,platform,publication_type,status,last_error,attempts)")
+    .select("id,body,media,status,workspace_id,approval_status,post_targets(id,social_account_id,platform,publication_type,status,last_error,attempts,publish_operation_id)")
     .eq("id", postId)
     .eq("workspace_id", ctx.workspace.workspace_id)
     .maybeSingle();
@@ -683,7 +739,7 @@ async function publishPost(ctx: any, postId: string) {
   if (post.approval_status === "rejected") throw new Error("Публикация отклонена. Отправьте её на согласование повторно.");
   if (!["draft", "scheduled", "failed", "partially_published"].includes(post.status)) throw new Error("Публикацию нельзя отправить из текущего состояния");
 
-  const media = await signedMedia(ctx.admin, post.media);
+  const media = await signedMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
   const targetIds = (post.post_targets ?? []).filter((t: any) => !["published"].includes(t.status));
   if (!targetIds.length) throw new Error("Нет целей для отправки");
 
@@ -693,19 +749,37 @@ async function publishPost(ctx: any, postId: string) {
   for (const target of targetIds) {
     try {
       const account = await accountRow(ctx.admin, target.social_account_id, ctx.workspace.workspace_id);
-      const secret = await getSecret(ctx.admin, account.id);
-      const externalPostId = await publish(account.platform as Platform, secret ?? {}, account.external_id ?? "", post.body ?? "", media as MediaItem[], account.metadata ?? {}, target.publication_type || "feed");
-      await ctx.admin.from("post_targets").update({
+      const storedSecret = await getSecret(ctx.admin, account.id);
+      const secret = effectiveSecret(account, storedSecret);
+      const externalPostId = await publish(account.platform as Platform, secret, account.external_id ?? "", post.body ?? "", media as MediaItem[], account.metadata ?? {}, target.publication_type || "feed");
+      const { error: confirmError } = await ctx.admin.from("post_targets").update({
         status: "published",
         external_post_id: externalPostId,
         published_at: new Date().toISOString(),
         last_error: null,
         updated_at: new Date().toISOString(),
       }).eq("id", target.id);
+      if (confirmError) {
+        const safe = sanitizeExternalError(confirmError);
+        await ctx.admin.from("publication_logs").insert({
+          post_target_id: target.id,
+          level: "error",
+          message: "Публикация отправлена внешней площадке, но результат не удалось сохранить. Автоматический повтор отключён.",
+          details: { platform: account.platform, publish_operation_id: target.publish_operation_id ?? null },
+        });
+        await ctx.admin.from("post_targets").update({
+          status: "failed",
+          last_error: "Внешняя публикация подтверждена, но результат не сохранён: " + safe,
+          next_attempt_at: null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", target.id);
+        results.push({ target_id: target.id, ok: false, error: "Публикация отправлена, но требует ручной проверки" });
+        continue;
+      }
       await ctx.admin.from("publication_logs").insert({ post_target_id: target.id, level: "info", message: "Публикация отправлена", details: { platform: account.platform, external_post_id: externalPostId } });
       results.push({ target_id: target.id, ok: true });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = sanitizeExternalError(error);
       await ctx.admin.from("post_targets").update({ status: "failed", last_error: message, updated_at: new Date().toISOString() }).eq("id", target.id);
       await ctx.admin.from("publication_logs").insert({ post_target_id: target.id, level: "error", message, details: { platform: target.platform } });
       results.push({ target_id: target.id, ok: false, error: message });
@@ -919,7 +993,7 @@ Deno.serve(async (req: Request) => {
           if (loadError) throw loadError;
           if (!post) throw new Error("Публикация не найдена");
           if (post.status === "publishing") throw new Error("Нельзя удалить публикацию во время отправки");
-          await deleteStoredMedia(ctx.admin, post.media);
+          await deleteStoredMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
           const { error } = await ctx.admin.from("posts").delete().eq("id", body.post_id).eq("workspace_id", ctx.workspace.workspace_id);
           if (error) throw error;
         }
@@ -1065,7 +1139,10 @@ Deno.serve(async (req: Request) => {
             .order("platform", { ascending: true })
             .order("display_name", { ascending: true });
           if (error) throw error;
-          return json({ ok: true, accounts: data ?? [] });
+          return json({ ok: true, accounts: (data ?? []).map((account:any)=>({
+            ...account,
+            last_error: account.last_error ? sanitizeExternalError(account.last_error) : null,
+          })) });
         }
       case "telegram-notifications-start": {
         const token = Deno.env.get("TGRML_NOTIFY_BOT_TOKEN") ?? "";
@@ -1185,15 +1262,16 @@ Deno.serve(async (req: Request) => {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
           const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
           const username = Deno.env.get("MAX_CONNECT_BOT_USERNAME") ?? "";
-          if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
           const webhookSecret = Deno.env.get("MAX_WEBHOOK_SECRET") ?? "";
+          if (!token || !username) throw new Error("Служебный MAX-бот ещё не настроен");
+          if (!webhookSecret) throw new Error("MAX_WEBHOOK_SECRET ещё не настроен");
           const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
           if (supabaseUrl) {
             const subscriptionBody: Record<string, unknown> = {
               url: (supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl) + "/functions/v1/max-webhook",
               update_types: ["bot_added", "bot_removed", "chat_title_changed", "bot_admin_permissions_changed", "message_created"],
             };
-            if (webhookSecret) subscriptionBody.secret = webhookSecret;
+            subscriptionBody.secret = webhookSecret;
             const webhookResponse = await fetch("https://platform-api2.max.ru/subscriptions", {
               method: "POST",
               headers: { Authorization: token, "content-type": "application/json" },
@@ -1253,7 +1331,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: token });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("max", secret ?? {}, chatId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1265,7 +1344,7 @@ Deno.serve(async (req: Request) => {
             if (updateError) throw updateError;
             return json({ ok: true, account: updated });
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = sanitizeExternalError(error);
             await ctx.admin.from("social_accounts").update({ status: "error", last_error: message }).eq("id", account.id);
             throw new Error(message);
           }
@@ -1431,7 +1510,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("vk", secret ?? {}, groupId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1474,7 +1554,8 @@ Deno.serve(async (req: Request) => {
           if (accountError) throw accountError;
           try {
             await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck("instagram", secret ?? {}, instagramId, metadata);
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
               status: "connected",
@@ -1520,7 +1601,8 @@ Deno.serve(async (req: Request) => {
               p_expires_at: body.token_expires_at ? new Date(body.token_expires_at).toISOString() : null,
               p_client_secret: body.client_secret || null,
             });
-            const secret = await getSecret(ctx.admin, account.id);
+            const storedSecret = await getSecret(ctx.admin, account.id);
+  const secret = effectiveSecret(account, storedSecret);
             const checked = await healthcheck(platform as Platform, secret ?? {}, externalId, metadata);
             const nextMetadata = checked?.metadata_patch ? { ...metadata, ...checked.metadata_patch } : metadata;
             const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
@@ -1542,8 +1624,8 @@ Deno.serve(async (req: Request) => {
       case "check-account":
         {
           const account = await accountRow(ctx.admin, body.account_id, ctx.workspace.workspace_id);
-          const secret = await getSecret(ctx.admin, account.id);
-          const checked = await healthcheck(account.platform as Platform, secret ?? {}, account.external_id ?? "", account.metadata ?? {});
+          const storedSecret = await getSecret(ctx.admin, account.id);
+          const checked = await healthcheck(account.platform as Platform, effectiveSecret(account, storedSecret), account.external_id ?? "", account.metadata ?? {});
           const nextMetadata = checked?.metadata_patch ? { ...(account.metadata ?? {}), ...checked.metadata_patch } : (account.metadata ?? {});
           const { data, error } = await ctx.admin.from("social_accounts").update({
             status: "connected",
@@ -1790,6 +1872,18 @@ Deno.serve(async (req: Request) => {
       case "ai-generate":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const workspaceLimit = await ctx.admin.rpc("consume_api_rate_limit", {
+            p_key: "ai-workspace:" + ctx.workspace.workspace_id,
+            p_limit: 200,
+            p_window_seconds: 86400,
+          });
+          if (workspaceLimit.error) throw workspaceLimit.error;
+          const quota = Array.isArray(workspaceLimit.data) ? workspaceLimit.data[0] : workspaceLimit.data;
+          if (quota?.allowed !== true) {
+            const resetAt = quota?.reset_at ? new Date(quota.reset_at).toISOString() : new Date(Date.now() + 86400000).toISOString();
+            const retryAfter = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+            return json({ ok: false, error: "Дневная квота AI для рабочего пространства исчерпана.", retry_at: resetAt }, 429, { "Retry-After": String(retryAfter) });
+          }
           const text = typeof body.text === "string" ? body.text.trim() : "";
           const mode = typeof body.mode === "string" ? body.mode : "improve";
           const platform = typeof body.platform === "string" ? body.platform : undefined;
@@ -1839,40 +1933,37 @@ Deno.serve(async (req: Request) => {
             let scheduledAt: string | null = null;
             if (typeof row.date === "string" && row.date.trim()) {
               const time = typeof row.time === "string" && row.time.trim() ? row.time.trim() : "12:00";
-              const candidate = new Date(row.date.trim() + "T" + time + ":00");
-              if (Number.isNaN(candidate.getTime()) || candidate.getTime() <= Date.now()) {
-                errors.push("Строка " + (index + 2) + ": дата/время некорректны или уже прошли");
+              try {
+                scheduledAt = zonedLocalDateTimeToUtc(row.date.trim(), time, ctx.workspace.workspace_timezone);
+              } catch {
+                errors.push("Строка " + (index + 2) + ": дата/время некорректны");
                 continue;
               }
-              scheduledAt = candidate.toISOString();
+              if (new Date(scheduledAt).getTime() <= Date.now()) {
+                errors.push("Строка " + (index + 2) + ": дата/время уже прошли по часовому поясу рабочего пространства");
+                continue;
+              }
             }
 
-            const { data: post, error: postError } = await ctx.admin.from("posts").insert({
-              workspace_id: ctx.workspace.workspace_id,
-              user_id: ctx.user.id,
-              body: text,
-              media: [],
-              status: scheduledAt ? "scheduled" : "draft",
-              scheduled_at: scheduledAt,
-              approval_status: "not_required",
-            }).select("id").single();
-            if (postError) { errors.push("Строка " + (index + 2) + ": " + postError.message); continue; }
-
-            const targetRows = selectedAccounts.map((account:any)=>({
-              post_id: post.id,
-              social_account_id: account.id,
-              platform: account.platform,
-              publication_type: "feed",
-              status: scheduledAt ? "pending" : "waiting",
-            }));
-            const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
-            if (targetError) {
-              await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
-              errors.push("Строка " + (index + 2) + ": " + targetError.message);
+            const targetPublicationTypes: Record<string,string> = {};
+            const targetAccountIds = selectedAccounts.map((account:any) => {
+              targetPublicationTypes[account.id] = "feed";
+              return account.id;
+            });
+            try {
+              const postId = await savePost(ctx, {
+                text,
+                media: [],
+                status: scheduledAt ? "scheduled" : "draft",
+                scheduled_at: scheduledAt,
+                target_account_ids: targetAccountIds,
+                target_publication_types: targetPublicationTypes,
+              });
+              created.push(postId);
+            } catch (error) {
+              errors.push("Строка " + (index + 2) + ": " + sanitizeExternalError(error));
               continue;
             }
-
-            created.push(post.id);
           }
 
           return json({ ok: true, created, errors: errors.slice(0, 50) });
@@ -1889,7 +1980,7 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           for (const post of posts ?? []) {
             if (post.status === "publishing") continue;
-            await deleteStoredMedia(ctx.admin, post.media);
+            await deleteStoredMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
             await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
           }
           return json({ ok: true, deleted: (posts ?? []).filter((post: any) => post.status !== "publishing").length });
@@ -1929,27 +2020,20 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           const created: string[] = [];
           for (const post of posts ?? []) {
-            const { data: copy, error: copyError } = await ctx.admin.from("posts").insert({
-              workspace_id: ctx.workspace.workspace_id,
-              user_id: ctx.user.id,
-              body: post.body,
-              media: post.media,
+            const targetAccountIds = (post.post_targets ?? []).map((target:any) => target.social_account_id);
+            const targetPublicationTypes: Record<string,string> = {};
+            for (const target of post.post_targets ?? []) {
+              targetPublicationTypes[target.social_account_id] = "feed";
+            }
+            const postId = await savePost(ctx, {
+              text: post.body ?? "",
+              media: post.media ?? [],
               status: "draft",
               scheduled_at: null,
-              approval_status: "not_required",
-            }).select("id").single();
-            if (copyError) throw copyError;
-            const targetRows = (post.post_targets ?? []).map((target: any) => ({
-              post_id: copy.id,
-              social_account_id: target.social_account_id,
-              platform: target.platform,
-              status: "waiting",
-            }));
-            if (targetRows.length) {
-              const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
-              if (targetError) throw targetError;
-            }
-            created.push(copy.id);
+              target_account_ids: targetAccountIds,
+              target_publication_types: targetPublicationTypes,
+            });
+            created.push(postId);
           }
           return json({ ok: true, created });
         }
@@ -2004,113 +2088,60 @@ Deno.serve(async (req: Request) => {
       case "request-approval":
         {
           if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав");
-          const { data: post, error } = await ctx.admin.from("posts")
-            .select("id,status,approval_status")
-            .eq("id", String(body.post_id || ""))
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .maybeSingle();
-          if (error) throw error;
-          if (!post) throw new Error("Публикация не найдена");
-          if (post.status === "publishing") throw new Error("Нельзя отправить на согласование публикацию во время отправки");
+          const postId = String(body.post_id || "");
+          if (!postId) throw new Error("Не указана публикация");
 
-          await ctx.admin.from("post_approvals")
-            .update({ status: "rejected", reviewed_at: new Date().toISOString(), comment: "Предыдущий запрос закрыт новым запросом" })
-            .eq("post_id", post.id)
-            .eq("status", "pending");
-
-          const { error: postError } = await ctx.admin.from("posts").update({
-            approval_status: "pending",
-            approval_requested_by: ctx.user.id,
-            approval_approved_by: null,
-            approval_comment: null,
-            approval_updated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq("id", post.id);
-          if (postError) throw postError;
-
-          const { error: approvalError } = await ctx.admin.from("post_approvals").insert({
-            workspace_id: ctx.workspace.workspace_id,
-            post_id: post.id,
-            requested_by: ctx.user.id,
-            status: "pending",
+          const { data: requestId, error: requestError } = await ctx.admin.rpc("request_post_approval", {
+            p_post_id: postId,
+            p_workspace_id: ctx.workspace.workspace_id,
+            p_user_id: ctx.user.id,
           });
-          if (approvalError) throw approvalError;
-          const { data: approvers, error: approverError } = await ctx.admin.from("workspace_members")
-            .select("user_id")
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .in("role", ["owner", "admin", "approver"]);
-          if (approverError) throw approverError;
+          if (requestError) throw requestError;
+
           await createWorkspaceNotifications(
             ctx,
-            (approvers ?? []).map((row:any)=>row.user_id),
-            "Новая публикация на согласование",
-            "Пользователь отправил публикацию на проверку.",
+            [ctx.user.id],
+            "Публикация отправлена на согласование",
+            "Запрос на согласование создан.",
             "approval_requested",
           );
-          await runAutomations(ctx,"approval_requested","Новая публикация на согласование","Пост отправлен на проверку.","approval_requested");
-          return json({ ok: true, approval_status: "pending" });
+          return json({ ok: true, approval_id: requestId });
         }
       case "review-approval":
         {
-          if (!["owner", "admin", "approver"].includes(ctx.workspace.role)) {
-            throw new Error("Согласовывать публикации может только руководитель или согласующий");
-          }
-          const postId = String(body.post_id || "");
           const decision = body.decision === "approved" ? "approved" : body.decision === "rejected" ? "rejected" : "";
           if (!decision) throw new Error("Некорректное решение");
+          const postId = String(body.post_id || "");
+          if (!postId) throw new Error("Не указана публикация");
           const comment = typeof body.comment === "string" && body.comment.trim() ? body.comment.trim() : null;
 
-          const { data: post, error: postError } = await ctx.admin.from("posts")
-            .select("id,status,approval_status")
-            .eq("id", postId)
-            .eq("workspace_id", ctx.workspace.workspace_id)
-            .maybeSingle();
-          if (postError) throw postError;
-          if (!post) throw new Error("Публикация не найдена");
-          if (post.approval_status !== "pending") throw new Error("Эта публикация больше не ожидает согласования");
+          const { data, error } = await ctx.admin.rpc("review_post_approval", {
+            p_post_id: postId,
+            p_workspace_id: ctx.workspace.workspace_id,
+            p_reviewer_id: ctx.user.id,
+            p_decision: decision,
+            p_comment: comment,
+          });
+          if (error) throw error;
 
-          const { data: approval, error: approvalLoadError } = await ctx.admin.from("post_approvals")
-            .select("id")
-            .eq("post_id", postId)
-            .eq("status", "pending")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (approvalLoadError) throw approvalLoadError;
-
-          const { error: updatePostError } = await ctx.admin.from("posts").update({
-            approval_status: decision,
-            approval_approved_by: ctx.user.id,
-            approval_comment: comment,
-            approval_updated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq("id", postId);
-          if (updatePostError) throw updatePostError;
-
-          if (approval) {
-            const { data: requestRow } = await ctx.admin.from("post_approvals")
-              .select("requested_by")
-              .eq("id", approval.id)
-              .maybeSingle();
-            const { error: updateApprovalError } = await ctx.admin.from("post_approvals").update({
-              status: decision,
-              reviewed_by: ctx.user.id,
-              comment,
-              reviewed_at: new Date().toISOString(),
-            }).eq("id", approval.id);
-            if (updateApprovalError) throw updateApprovalError;
-            if (requestRow?.requested_by) {
-              await createWorkspaceNotifications(
-                ctx,
-                [requestRow.requested_by],
-                decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
-                comment || "Статус публикации изменён.",
-                "approval_reviewed",
-              );
-            }
+          const row = Array.isArray(data) ? data[0] : data;
+          if (row?.requested_by) {
+            await createWorkspaceNotifications(
+              ctx,
+              [row.requested_by],
+              decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
+              comment || "Статус публикации изменён.",
+              "approval_reviewed",
+            );
           }
 
-          await runAutomations(ctx,"approval_reviewed",decision === "approved" ? "Публикация согласована" : "Публикация отклонена","Согласование завершено.","approval_reviewed");
+          await runAutomations(
+            ctx,
+            "approval_reviewed",
+            decision === "approved" ? "Публикация согласована" : "Публикация отклонена",
+            "Согласование завершено.",
+            "approval_reviewed",
+          );
           return json({ ok: true, approval_status: decision });
         }
       case "list-approval-queue":

@@ -138,7 +138,7 @@ export default function TeamPage() {
               <input className="workspace-limit-input" type="number" min="1" max="10000" value={limit} onChange={e=>setLimit(e.target.value)} />
               <button className="primary" disabled={limitBusy} onClick={()=>void saveLimit()}>{limitBusy?'Сохраняем…':'Сохранить'}</button>
             </div>
-          </section>}}
+          </section>}
           <section className="card">
             <div className="card-head"><h2>Участники</h2><span>{members.length}{workspace?.max_members ? ' / ' + workspace.max_members : ''}</span></div>
             <div className="member-list">

@@ -7,6 +7,36 @@ function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+function sanitizeExternalError(error: unknown) {
+  let message = error instanceof Error ? error.message : String(error ?? "Неизвестная ошибка");
+  message = message
+    .replace(/([?&](?:access_token|client_secret|refresh_token|token|api_key|code)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/https?:\/\/api\.telegram\.org\/bot[^/\s]+/gi, "https://api.telegram.org/bot[REDACTED]")
+    .replace(/Authorization\s*:\s*[^\s]+/gi, "Authorization: [REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [REDACTED]");
+  return message.slice(0, 1000);
+}
+
+function effectiveSecret(account: any, stored: any) {
+  const method = String(account?.metadata?.connection_method ?? "");
+  if (account?.platform === "telegram" && (method === "service_bot" || method === "business_bot")) {
+    const token = Deno.env.get("TELEGRAM_SERVICE_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный Telegram-бот не настроен");
+    return { access_token: token };
+  }
+  if (account?.platform === "max" && method === "service_bot") {
+    const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
+    if (!token) throw new Error("Служебный MAX-бот не настроен");
+    return { access_token: token };
+  }
+  return stored ?? {};
+}
+
+function isRetryableMetricsError(error: unknown) {
+  const message = sanitizeExternalError(error);
+  return !/(\b400\b|\b401\b|\b403\b|\b404\b|invalid|unauthorized|forbidden|permission|not found|неверн|не найден|unsupported|token)/i.test(message);
+}
+
 async function api(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
   const raw = await response.text();
@@ -146,7 +176,7 @@ Deno.serve(async (req: Request) => {
         return;
       }
       const { data: target, error: targetError } = await admin.from("post_targets")
-        .select("id,platform,publication_type,social_account_id,external_post_id,metrics,posts!inner(workspace_id),social_accounts!inner(id,platform,external_id,status)")
+        .select("id,platform,publication_type,social_account_id,external_post_id,metrics,posts!inner(workspace_id),social_accounts!inner(id,platform,external_id,status,metadata)")
         .eq("id", targetId)
         .maybeSingle();
       if (targetError || !target || target.status !== "published" || !target.external_post_id || target.social_accounts?.status !== "connected") {
@@ -161,7 +191,8 @@ Deno.serve(async (req: Request) => {
       }
 
       try {
-        const s = await secret(admin, target.social_accounts.id);
+        const stored = await secret(admin, target.social_accounts.id);
+        const s = effectiveSecret(target.social_accounts, stored);
         const fresh = await fetchMetrics(
           target.social_accounts.platform,
           s?.access_token ?? "",
@@ -192,13 +223,14 @@ Deno.serve(async (req: Request) => {
         await admin.from("stats_cache").delete().eq("workspace_id", target.posts.workspace_id);
         processed++;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = sanitizeExternalError(error);
         const attempts = Number(target.metrics_attempts ?? job.read_count ?? 1) + 1;
+        const retry = attempts < 5 && isRetryableMetricsError(error);
         const delayMinutes = Math.min(60, Math.pow(2, Math.max(0, attempts - 1)));
         await admin.from("post_targets").update({
           metrics_queued_at: null,
           metrics_attempts: attempts,
-          metrics_next_attempt_at: new Date(Date.now() + delayMinutes * 60 * 1000).toISOString(),
+          metrics_next_attempt_at: retry ? new Date(Date.now() + delayMinutes * 60 * 1000).toISOString() : null,
           metrics_last_error: message,
           updated_at: new Date().toISOString(),
         }).eq("id", targetId);
