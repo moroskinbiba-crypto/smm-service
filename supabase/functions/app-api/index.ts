@@ -106,10 +106,12 @@ function canManageAccounts(role: string) {
   return ["owner", "admin"].includes(role);
 }
 
-async function signedMedia(admin: any, media: unknown) {
+async function signedMedia(admin: any, media: unknown, workspaceId: string) {
   const items = Array.isArray(media) ? media : [];
+  const prefix = workspaceId + "/";
   return Promise.all(items.map(async (raw: any, index) => {
     const path = typeof raw?.path === "string" ? raw.path : "";
+    if (path && !path.startsWith(prefix)) throw new Error("Недопустимый путь к медиафайлу");
     let signed_url: string | null = null;
     if (path) {
       const { data } = await admin.storage.from("media").createSignedUrl(path, 3600);
@@ -126,10 +128,11 @@ async function signedMedia(admin: any, media: unknown) {
   }));
 }
 
-async function deleteStoredMedia(admin: any, media: unknown) {
+async function deleteStoredMedia(admin: any, media: unknown, workspaceId: string) {
+  const prefix = workspaceId + "/";
   const paths = (Array.isArray(media) ? media : [])
     .map((item: any) => typeof item?.path === "string" ? item.path : "")
-    .filter(Boolean);
+    .filter((path: string) => path.startsWith(prefix));
 
   if (!paths.length) return;
   await admin.storage.from("media").remove(paths);
@@ -217,7 +220,7 @@ async function requireTargets(admin: any, workspaceId: string, ids: string[]) {
   return data;
 }
 
-function validateMedia(media: unknown) {
+function validateMedia(media: unknown, workspaceId?: string) {
   const items = Array.isArray(media) ? media : [];
   if (items.length > 10) throw new Error("В одной публикации можно добавить не более 10 медиафайлов");
   for (const item of items) {
@@ -228,6 +231,7 @@ function validateMedia(media: unknown) {
     }
     if (size > 50 * 1024 * 1024) throw new Error("Размер файла не должен превышать 50 МБ");
     if (typeof item?.path !== "string" || !item.path) throw new Error("У медиафайла отсутствует путь");
+    if (workspaceId && !item.path.startsWith(workspaceId + "/")) throw new Error("Медиафайл не принадлежит текущему рабочему пространству");
   }
   return items;
 }
@@ -235,7 +239,7 @@ function validateMedia(media: unknown) {
 async function savePost(ctx: any, body: any) {
   if (!canEdit(ctx.workspace.role)) throw new Error("Недостаточно прав для публикации");
   const bodyText = typeof body.text === "string" ? body.text : "";
-  const media = validateMedia(body.media);
+  const media = validateMedia(body.media, ctx.workspace.workspace_id);
   const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null;
   if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now() && body.status !== "draft") {
     throw new Error("Дата и время публикации должны быть в будущем");
@@ -310,7 +314,7 @@ async function loadPosts(ctx: any, body: any) {
       })
       .map(async (post: any) => ({
         ...post,
-        media: await signedMedia(ctx.admin, post.media),
+        media: await signedMedia(ctx.admin, post.media, ctx.workspace.workspace_id),
       })),
   );
 
@@ -735,7 +739,7 @@ async function publishPost(ctx: any, postId: string) {
   if (post.approval_status === "rejected") throw new Error("Публикация отклонена. Отправьте её на согласование повторно.");
   if (!["draft", "scheduled", "failed", "partially_published"].includes(post.status)) throw new Error("Публикацию нельзя отправить из текущего состояния");
 
-  const media = await signedMedia(ctx.admin, post.media);
+  const media = await signedMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
   const targetIds = (post.post_targets ?? []).filter((t: any) => !["published"].includes(t.status));
   if (!targetIds.length) throw new Error("Нет целей для отправки");
 
@@ -989,7 +993,7 @@ Deno.serve(async (req: Request) => {
           if (loadError) throw loadError;
           if (!post) throw new Error("Публикация не найдена");
           if (post.status === "publishing") throw new Error("Нельзя удалить публикацию во время отправки");
-          await deleteStoredMedia(ctx.admin, post.media);
+          await deleteStoredMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
           const { error } = await ctx.admin.from("posts").delete().eq("id", body.post_id).eq("workspace_id", ctx.workspace.workspace_id);
           if (error) throw error;
         }
@@ -1983,7 +1987,7 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           for (const post of posts ?? []) {
             if (post.status === "publishing") continue;
-            await deleteStoredMedia(ctx.admin, post.media);
+            await deleteStoredMedia(ctx.admin, post.media, ctx.workspace.workspace_id);
             await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
           }
           return json({ ok: true, deleted: (posts ?? []).filter((post: any) => post.status !== "publishing").length });
