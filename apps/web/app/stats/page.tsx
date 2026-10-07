@@ -134,7 +134,7 @@ export default function StatsPage() {
     ['Опубликовано', number(summary.published), 'успешных публикаций'],
     ['Запланировано', number(summary.scheduled), 'сейчас в очереди'],
     ['Ошибки', number(summary.failed), 'публикаций с ошибкой'],
-    ['Просмотры (Views)', number(summary.views), 'суммарные просмотры / охват'],
+    ['Просмотры (Views)', number(summary.views), 'суммарные просмотры'],
     ['Лайки (Likes)', number(summary.likes), 'реакции'],
     ['Комментарии (Comments)', number(summary.comments), 'комментарии'],
     ['Репосты (Shares)', number(summary.reposts), 'репосты'],
@@ -224,13 +224,13 @@ export default function StatsPage() {
           <div className="stats-table stats-table-wide">
             <div className="stats-row stats-head">
               <span>Площадка</span>
-              <span>Посты</span>
-              <span>Просмотры</span>
-              <span>Лайки</span>
-              <span>Комментарии</span>
-              <span>Репосты</span>
+              <span>Posts</span>
+              <span>Views</span>
+              <span>Likes</span>
+              <span>Comments</span>
+              <span>Shares</span>
               <span>ER</span>
-              <span>Успешность</span>
+              <span>Success Rate</span>
             </div>
             {platforms.map(p => (
               <div className="stats-row" key={p.platform}>
