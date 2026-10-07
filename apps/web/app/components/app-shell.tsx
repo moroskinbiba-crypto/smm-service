@@ -18,6 +18,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem('smm-theme');
@@ -61,6 +62,10 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
     return () => { cancelled = true; };
   }, [supabase]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
   async function signOut() {
     await supabase.auth.signOut();
     window.location.assign('/auth');
@@ -70,8 +75,21 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
 
   return <main className={theme==='dark'?'shell dark':'shell'}>
     <header className="topbar app-topbar">
-      <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
-      <nav className="main-nav" aria-label="Основная навигация">
+      <div className="mobile-header-left">
+        <button
+          type="button"
+          className="mobile-menu-toggle"
+          aria-label={mobileNavOpen ? "Закрыть меню" : "Открыть меню"}
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen(value => !value)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <div className="brand"><span className="brand-mark">T</span><span>TGRMLposting</span></div>
+      </div>
+      <nav className={mobileNavOpen ? "main-nav mobile-open" : "main-nav"} aria-label="Основная навигация">
         <Link className={active==='plan'?'nav-link active':'nav-link'} href="/">План публикаций</Link>
         <Link className={active==='accounts'?'nav-link active':'nav-link'} href="/accounts">Аккаунты</Link>
         <Link className={active==='stats'?'nav-link active':'nav-link'} href="/stats">Статистика</Link>
@@ -85,6 +103,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <Link className={active==='media'?'nav-link active':'nav-link'} href="/media">Медиа</Link>
         {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Админ</Link>}
       </nav>
+      {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="Закрыть меню" onClick={() => setMobileNavOpen(false)} />}
       <div className="top-actions">
         <select
           className="workspace-switcher"
