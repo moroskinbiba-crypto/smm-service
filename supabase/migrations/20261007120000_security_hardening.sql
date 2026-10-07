@@ -576,3 +576,92 @@ grant execute on function public.accept_workspace_invite_for_user(uuid,text) to 
 
 drop function if exists public.create_workspace_invite_for_user(uuid,integer);
 drop function if exists public.get_workspace_for_user(uuid);
+
+ 
+create or replace function public.request_post_approval(
+  p_post_id uuid,p_workspace_id uuid,p_user_id uuid
+)
+returns uuid
+language plpgsql security definer set search_path to 'public','pg_temp'
+as $function$
+declare v_role text; v_status text; v_request_id uuid;
+begin
+  select wm.role into v_role
+  from public.workspace_members wm
+  where wm.workspace_id=p_workspace_id and wm.user_id=p_user_id;
+  if v_role is null or v_role not in ('owner','admin','editor','publisher') then
+    raise exception 'Недостаточно прав для отправки на согласование';
+  end if;
+  select status into v_status from public.posts
+  where id=p_post_id and workspace_id=p_workspace_id
+  for update;
+  if v_status is null then raise exception 'Публикация не найдена'; end if;
+  if v_status='publishing' then raise exception 'Нельзя отправить на согласование публикацию во время отправки'; end if;
+
+  update public.post_approvals
+  set status='rejected',reviewed_at=now(),comment='Предыдущий запрос закрыт новым запросом'
+  where post_id=p_post_id and status='pending';
+
+  update public.posts
+  set approval_status='pending',approval_requested_by=p_user_id,approval_approved_by=null,
+      approval_comment=null,approval_updated_at=now(),updated_at=now()
+  where id=p_post_id and workspace_id=p_workspace_id;
+
+  insert into public.post_approvals(workspace_id,post_id,requested_by,status)
+  values(p_workspace_id,p_post_id,p_user_id,'pending')
+  returning id into v_request_id;
+  return v_request_id;
+end;
+$function$;
+
+create or replace function public.review_post_approval(
+  p_post_id uuid,p_workspace_id uuid,p_reviewer_id uuid,p_decision text,p_comment text
+)
+returns table(requested_by uuid,decision text)
+language plpgsql security definer set search_path to 'public','pg_temp'
+as $function$
+declare v_role text; v_requested_by uuid; v_approval_id uuid;
+begin
+  select wm.role into v_role
+  from public.workspace_members wm
+  where wm.workspace_id=p_workspace_id and wm.user_id=p_reviewer_id;
+  if v_role is null or v_role not in ('owner','admin','approver') then
+    raise exception 'Согласовывать публикации может только руководитель или согласующий';
+  end if;
+  if p_decision not in ('approved','rejected') then raise exception 'Некорректное решение'; end if;
+
+  perform 1 from public.posts
+  where id=p_post_id and workspace_id=p_workspace_id and approval_status='pending'
+  for update;
+  if not found then raise exception 'Эта публикация больше не ожидает согласования'; end if;
+
+  select pa.id,pa.requested_by into v_approval_id,v_requested_by
+  from public.post_approvals pa
+  where pa.post_id=p_post_id and pa.status='pending'
+  order by pa.created_at desc
+  limit 1
+  for update;
+
+  if v_approval_id is null then raise exception 'Запрос на согласование не найден'; end if;
+  if v_requested_by=p_reviewer_id then raise exception 'Нельзя согласовать собственную публикацию'; end if;
+
+  update public.posts
+  set approval_status=p_decision,approval_approved_by=p_reviewer_id,
+      approval_comment=nullif(trim(coalesce(p_comment,'')),''),
+      approval_updated_at=now(),updated_at=now()
+  where id=p_post_id and workspace_id=p_workspace_id;
+
+  update public.post_approvals
+  set status=p_decision,reviewed_by=p_reviewer_id,
+      comment=nullif(trim(coalesce(p_comment,'')),''),
+      reviewed_at=now()
+  where id=v_approval_id;
+
+  return query select v_requested_by,p_decision;
+end;
+$function$;
+
+revoke all on function public.request_post_approval(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.request_post_approval(uuid,uuid,uuid) to service_role;
+revoke all on function public.review_post_approval(uuid,uuid,uuid,text,text) from public,anon,authenticated;
+grant execute on function public.review_post_approval(uuid,uuid,uuid,text,text) to service_role;
