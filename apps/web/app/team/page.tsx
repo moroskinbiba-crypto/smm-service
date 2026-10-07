@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../components/app-shell';
 import { workspaceRequest } from '../../lib/workspace-api';
+import { appRequest } from '../../lib/app-api';
 import { createClient } from '../../lib/supabase/client';
 
 type Member = { user_id: string; display_name: string | null; role: string; created_at: string; invited_by: string | null; suspended_at: string | null; suspended_reason: string | null };
@@ -22,6 +23,9 @@ export default function TeamPage() {
   const [message, setMessage] = useState('');
   const [inviteRole, setInviteRole] = useState('editor');
   const [currentUserId, setCurrentUserId] = useState('');
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [limit, setLimit] = useState('');
+  const [limitBusy, setLimitBusy] = useState(false);
   const supabase = createClient();
 
   async function load() {
@@ -30,8 +34,15 @@ export default function TeamPage() {
         workspaceRequest<{ workspace?: Workspace }>('get-workspace'),
         workspaceRequest<{ members: Member[] }>('members'),
       ]);
-      if (workspaceResult.workspace) setWorkspace(workspaceResult.workspace);
+      if (workspaceResult.workspace) {
+        setWorkspace(workspaceResult.workspace);
+        setLimit(String(workspaceResult.workspace.max_members ?? ''));
+      }
       setMembers(membersResult.members ?? []);
+      try {
+        const adminResult = await appRequest<{is_admin:boolean}>('admin-check');
+        setIsPlatformAdmin(adminResult.is_admin === true);
+      } catch { setIsPlatformAdmin(false); }
 
       if (workspaceResult.workspace?.role === 'owner' || workspaceResult.workspace?.role === 'admin') {
         const invitesResult = await workspaceRequest<{ invites: Invite[] }>('list-invites');
@@ -96,6 +107,19 @@ export default function TeamPage() {
     finally{setBusy(false)}
   }
 
+  async function saveLimit(){
+    if(!workspace || !isPlatformAdmin) return;
+    const value=Number(limit);
+    if(!Number.isInteger(value)||value<1||value>10000){setMessage('Количество участников должно быть от 1 до 10000.');return;}
+    setLimitBusy(true);setMessage('');
+    try{
+      const result=await appRequest<{max_members:number}>('admin-set-workspace-limit',{workspace_id:workspace.workspace_id,max_members:value});
+      setWorkspace(prev=>prev?{...prev,max_members:result.max_members,workspace_kind:result.max_members>1?'team':prev.workspace_kind}:prev);
+      setMessage('Лимит команды сохранён.');
+    }catch(e){setMessage(e instanceof Error?e.message:'Не удалось сохранить лимит')}
+    finally{setLimitBusy(false)}
+  }
+
   const activeInvites = useMemo(() => invites.filter(item => !item.used_at && new Date(item.expires_at) > new Date()), [invites]);
 
   return (
@@ -107,6 +131,14 @@ export default function TeamPage() {
         </div>
         <div className="team-grid">
           {workspace?.workspace_kind === 'personal' && canInvite && <section className="card"><div className="auth-message">Это личный профиль. Создание первой команды через приглашение автоматически создаст отдельный личный профиль и превратит текущий профиль в командный.</div></section>}
+          {isPlatformAdmin && workspace && <section className="card">
+            <div className="card-head"><h2>Лимит команды</h2><span>{workspace.member_count ?? members.length} / {workspace.max_members ?? '—'}</span></div>
+            <p className="section-copy">Этот параметр доступен только вам как платформенному администратору. Он задаёт максимальное число участников команды.</p>
+            <div className="workspace-limit-row">
+              <input className="workspace-limit-input" type="number" min="1" max="10000" value={limit} onChange={e=>setLimit(e.target.value)} />
+              <button className="primary" disabled={limitBusy} onClick={()=>void saveLimit()}>{limitBusy?'Сохраняем…':'Сохранить'}</button>
+            </div>
+          </section>}}
           <section className="card">
             <div className="card-head"><h2>Участники</h2><span>{members.length}{workspace?.max_members ? ' / ' + workspace.max_members : ''}</span></div>
             <div className="member-list">
