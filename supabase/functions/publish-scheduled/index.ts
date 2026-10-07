@@ -52,15 +52,13 @@ Deno.serve(async (req: Request) => {
     runId = runRow?.id ?? null;
 
     const created = await processRecurrences(supabase);
-    const { data: recovered, error: recoverError } = await supabase.rpc("recover_stale_publication_targets", { p_limit: 200 });
-    if (recoverError) throw recoverError;
-    const { data: queued, error: queueError } = await supabase.rpc("enqueue_publication_jobs", { p_limit: 300 });
-    if (queueError) throw queueError;
 
-    const payload = { ok: true, enabled: true, created_recurrences: created, queued: Number(queued ?? 0), recovered: Number(recovered ?? 0) };
+    const payload = { ok: true, enabled: true, created_recurrences: created, queued: 0, recovered: 0 };
     if (runId) await supabase.from("scheduler_runs").update({
-      status: "success", finished_at: new Date().toISOString(), duration_ms: Date.now() - started,
-      queued: Number(queued ?? 0), recovered: Number(recovered ?? 0), details: payload,
+      status: "success",
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - started,
+      details: payload,
     }).eq("id", runId);
     return json(payload);
   } catch (error) {
