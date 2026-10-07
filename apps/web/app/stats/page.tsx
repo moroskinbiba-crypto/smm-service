@@ -173,6 +173,7 @@ export default function StatsPage() {
               </button>
             ))}
           </div>
+        </div>
         {period === 'custom' && <div className="stats-custom-period card">
           <label>С <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)} /></label>
           <label>По <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)} /></label>
