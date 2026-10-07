@@ -345,3 +345,17 @@ grant execute on function public.get_social_account_secret(uuid) to service_role
 grant execute on function public.upsert_social_account_secret(uuid,text,text,timestamptz) to service_role;
 grant execute on function public.upsert_social_account_secret(uuid,text,text,timestamptz,text) to service_role;
 grant execute on function public.delete_social_account_secret(uuid) to service_role;
+
+ 
+-- Keep future postgres-owned migrations hardened as well.
+alter default privileges for role postgres in schema public revoke all on tables from anon,authenticated;
+alter default privileges for role postgres in schema public revoke all on sequences from anon,authenticated;
+alter default privileges for role postgres in schema public revoke all on functions from anon,authenticated;
+
+revoke all on function public.save_post_bundle(uuid,uuid,uuid,text,jsonb,text,timestamptz,jsonb) from public,anon,authenticated;
+grant execute on function public.save_post_bundle(uuid,uuid,uuid,text,jsonb,text,timestamptz,jsonb) to service_role;
+
+create index if not exists telegram_notification_subscriptions_membership_idx
+  on public.telegram_notification_subscriptions(workspace_id,user_id);
+
+revoke all on function public.set_updated_at() from public,anon,authenticated;
