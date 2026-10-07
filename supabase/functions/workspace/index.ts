@@ -139,17 +139,11 @@ Deno.serve(async (req: Request) => {
           throw new Error("Руководитель может отключать только пользователей, которых пригласил лично");
         }
 
-        const { error: profileError } = await admin.from("profiles").update({
-          suspended_at: suspended ? new Date().toISOString() : null,
-          suspended_reason: suspended ? "Приостановлено руководителем команды" : null,
-          updated_at: new Date().toISOString(),
-        }).eq("id", targetUserId);
-        if (profileError) throw profileError;
-
-        const { error: banError } = await admin.auth.admin.updateUserById(targetUserId, {
-          ban_duration: suspended ? "876000h" : "none",
-        });
-        if (banError) throw banError;
+        const { error: memberError } = await admin.from("workspace_members").update({
+          member_suspended_at: suspended ? new Date().toISOString() : null,
+          member_suspended_reason: suspended ? "Приостановлено руководителем команды" : null,
+        }).eq("workspace_id", actor.workspace_id).eq("user_id", targetUserId);
+        if (memberError) throw memberError;
 
         return json({ ok: true, user_id: targetUserId, suspended });
       }
