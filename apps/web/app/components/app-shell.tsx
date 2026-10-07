@@ -112,7 +112,7 @@ export function AppShell({ active, children }: { active: 'plan' | 'accounts' | '
         <Link className={active==='accounts'?'nav-link active':'nav-link'} href="/accounts">Аккаунты</Link>
         <Link className={active==='stats'?'nav-link active':'nav-link'} href="/stats">Аналитика</Link>
         <Link className={active==='inbox'?'nav-link active':'nav-link'} href="/inbox">Комментарии{commentsUnread>0&&<span className="nav-badge">{commentsUnread>99?'99+':commentsUnread}</span>}</Link>
-        {<Link className={active==='approvals'?'nav-link active':'nav-link'} href="/approvals">Согласование{approvalsPending>0&&<span className="nav-badge">{approvalsPending>99?'99+':approvalsPending}</span>}</Link>}
+        <Link className={active==='approvals'?'nav-link active':'nav-link'} href="/approvals">Согласование{approvalsPending>0&&<span className="nav-badge">{approvalsPending>99?'99+':approvalsPending}</span>}</Link>
         <Link className={active==='team'?'nav-link active':'nav-link'} href="/team">Команда</Link>
         {isAdmin && <Link className={active==='admin'?'nav-link active nav-link-admin':'nav-link nav-link-admin'} href="/admin">Пользователи</Link>}
       </nav>
