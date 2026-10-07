@@ -665,3 +665,12 @@ revoke all on function public.request_post_approval(uuid,uuid,uuid) from public,
 grant execute on function public.request_post_approval(uuid,uuid,uuid) to service_role;
 revoke all on function public.review_post_approval(uuid,uuid,uuid,text,text) from public,anon,authenticated;
 grant execute on function public.review_post_approval(uuid,uuid,uuid,text,text) to service_role;
+
+ 
+drop function if exists public.accept_workspace_invite(text);
+drop function if exists public.create_workspace_invite(integer);
+drop function if exists public.get_my_workspace();
+drop function if exists public.list_workspace_invites();
+drop function if exists public.list_workspace_members();
+drop function if exists public.list_workspace_members_for_user(uuid);
+drop function if exists public.revoke_workspace_invite(uuid);
