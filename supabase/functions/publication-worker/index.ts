@@ -39,12 +39,15 @@ function isRetryablePublishError(error: unknown) {
   return true;
 }
 
-async function signedMedia(admin: any, media: any) {
+async function signedMedia(admin: any, media: any, workspaceId: string) {
   const items = Array.isArray(media) ? media : [];
+  const prefix = workspaceId + "/";
   return Promise.all(items.map(async (item: any, index: number) => {
-    const { data } = await admin.storage.from("media").createSignedUrl(String(item?.path ?? ""), 3600);
+    const path = String(item?.path ?? "");
+    if (path && !path.startsWith(prefix)) throw new Error("Медиафайл не принадлежит рабочему пространству");
+    const { data } = await admin.storage.from("media").createSignedUrl(path, 3600);
     return {
-      path: String(item?.path ?? ""),
+      path,
       name: item?.name,
       type: item?.type,
       size: item?.size,
@@ -175,7 +178,7 @@ Deno.serve(async (req: Request) => {
       const claim = claimedMap.get(targetId);
       if (!claim) {
         await supabase.rpc("archive_publication_job", { p_msg_id: Number(item.msg_id) });
-        continue;
+        return;
       }
 
       const { data: target, error: targetError } = await supabase.from("post_targets")
@@ -196,7 +199,7 @@ Deno.serve(async (req: Request) => {
           updated_at: new Date().toISOString(),
         }).eq("id", targetId).eq("lock_token", claim.lock_token);
         await supabase.rpc("archive_publication_job", { p_msg_id: Number(item.msg_id) });
-        continue;
+        return;
       }
 
       affectedPosts.add(target.post_id);
@@ -206,7 +209,7 @@ Deno.serve(async (req: Request) => {
         const post = target.posts;
         const storedSecret = await getSecret(supabase, account.id);
         const secret = effectiveSecret(account, storedSecret);
-        const media = await signedMedia(supabase, post.media);
+        const media = await signedMedia(supabase, post.media, post.workspace_id);
         const externalPostId = await publish(
           account.platform,
           secret ?? {},
@@ -253,6 +256,7 @@ Deno.serve(async (req: Request) => {
             details: { platform: account.platform, publish_operation_id: target.publish_operation_id },
           });
           failed++;
+          try { await supabase.rpc("archive_publication_job", { p_msg_id: Number(item.msg_id) }); } catch {}
           return;
         }
 
