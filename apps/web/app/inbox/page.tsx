@@ -139,9 +139,9 @@ export default function InboxPage() {
       <section className="page-section inbox-page">
         <div className="page-heading">
           <div>
-            <div className="eyebrow">КОММУНИКАЦИИ</div>
-            <h1>Входящие</h1>
-            <p>Сообщения и комментарии из подключённых социальных сетей в одном окне.</p>
+            <div className="eyebrow">КОММЕНТАРИИ</div>
+            <h1>Комментарии</h1>
+            <p>Комментарии и ответы из подключённых социальных сетей в одном окне.</p>
           </div>
           <button className="secondary" disabled={syncing} onClick={() => void sync()}>{syncing ? 'Обновляем…' : '↻ Обновить'}</button>
         </div>

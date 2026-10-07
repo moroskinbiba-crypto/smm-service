@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { AppShell } from '../components/app-shell';
 import { appRequest } from '../../lib/app-api';
 
@@ -73,6 +74,9 @@ type Comparison = { posts:number; published:number; views:number; likes:number; 
 type TopPost = { post_id:string; preview:string; views:number; likes:number; comments:number; reposts:number; clicks:number; score:number };
 type BestHour = { hour:number; published:number; views:number; engagement:number };
 type BenchmarkAccount = { account_id:string; platform:string; name:string; published:number; failed:number; views:number; likes:number; comments:number; reposts:number; engagement:number; engagement_rate:number; avg_views:number; success_rate:number; rank:number };
+type Topic = { term:string; count:number; avg_views:number; views:number; posts:number };
+type Weekday = { label:string; posts:number; avg_views:number };
+type Notification = { id:string; type:string; title:string; body:string; read_at:string|null; created_at:string };
 
 export default function StatsPage() {
   const [period, setPeriod] = useState<'7' | '30' | '90' | 'custom'>('30');
@@ -86,6 +90,13 @@ export default function StatsPage() {
   const [topPosts, setTopPosts] = useState<TopPost[]>([]);
   const [bestHours, setBestHours] = useState<BestHour[]>([]);
   const [benchmarkAccounts, setBenchmarkAccounts] = useState<BenchmarkAccount[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [bestTopics, setBestTopics] = useState<Topic[]>([]);
+  const [weekdays, setWeekdays] = useState<Weekday[]>([]);
+  const [analyzed, setAnalyzed] = useState(0);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [telegramLink, setTelegramLink] = useState<{start_url:string;bot_username:string;expires_at:string}|null>(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -113,6 +124,19 @@ export default function StatsPage() {
     void load().catch(e => setMsg(e instanceof Error ? e.message : 'Не удалось загрузить статистику'));
   }, [period, customFrom, customTo]);
 
+  useEffect(() => {
+    void Promise.all([
+      appRequest<{posts_analyzed:number;topics:Topic[];best_topics:Topic[];weekdays:Weekday[]}>('content-insights'),
+      appRequest<{notifications:Notification[]}>('list-notifications'),
+    ]).then(([content, notices]) => {
+      setAnalyzed(content.posts_analyzed ?? 0);
+      setTopics(content.topics ?? []);
+      setBestTopics(content.best_topics ?? []);
+      setWeekdays(content.weekdays ?? []);
+      setNotifications(notices.notifications ?? []);
+    }).catch(e => setMsg(e instanceof Error ? e.message : 'Не удалось загрузить аналитику'));
+  }, []);
+
   async function refreshMetrics() {
     setRefreshing(true);
     setMsg('');
@@ -126,6 +150,29 @@ export default function StatsPage() {
       setMsg(e instanceof Error ? e.message : 'Не удалось обновить метрики');
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function markNotification(id:string) {
+    try {
+      await appRequest('mark-notification-read',{notification_id:id});
+      setNotifications(items => items.map(item => item.id===id ? {...item,read_at:new Date().toISOString()} : item));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Не удалось отметить уведомление');
+    }
+  }
+
+  async function connectTelegramNotifications() {
+    setTelegramBusy(true);
+    setMsg('');
+    try {
+      const result = await appRequest<{start_url:string;bot_username:string;expires_at:string}>('telegram-notifications-start');
+      setTelegramLink(result);
+      window.open(result.start_url,'_blank','noopener,noreferrer');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Не удалось подключить Telegram-уведомления');
+    } finally {
+      setTelegramBusy(false);
     }
   }
 
@@ -159,8 +206,8 @@ export default function StatsPage() {
         <div className="page-heading">
           <div>
             <div className="eyebrow">АНАЛИТИКА</div>
-            <h1>Статистика</h1>
-            <p>Публикации, охват и вовлечённость по подключённым площадкам.</p>
+            <h1>Аналитика</h1>
+            <p>Единая аналитика публикаций, контента, площадок и уведомлений.</p>
           </div>
           <div className="period-switch">
             {([['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней'], ['custom', 'Свой период']] as const).map(([id, name]) => (
@@ -277,17 +324,8 @@ export default function StatsPage() {
           </section>
         </section>
 
-        <section className="card stats-benchmark">
-          <div className="card-head"><h2>Benchmark внутри команды</h2><span>сравнение подключённых аккаунтов</span></div>
-          <div className="stats-table stats-table-wide">
-            <div className="stats-row stats-head"><span>Аккаунт</span><span>Площадка</span><span>Posts</span><span>Средние просмотры</span><span>ER (Engagement Rate)</span><span>Success Rate</span><span>Место</span></div>
-            {benchmarkAccounts.map(account=><div className="stats-row" key={account.account_id}><span><strong>{account.name}</strong></span><span>{platformNames[account.platform] ?? account.platform}</span><span>{number(account.published)}</span><span>{number(account.avg_views)}</span><span>{percent(account.engagement_rate)}</span><span>{percent(account.success_rate)}</span><span>#{account.rank}</span></div>)}
-            {!benchmarkAccounts.length&&<div className="empty small-empty">Нужно несколько подключённых аккаунтов и публикаций для benchmark.</div>}
-          </div>
-        </section>
-
         <section className="card stats-top-posts">
-          <div className="card-head"><h2>Лучшие публикации</h2><span>по просмотрам и вовлечённости</span></div>
+          <div className="card-head"><h2>Лучшие публикации</h2><span>выше benchmark: сначала сильнейший контент</span></div>
           <div className="stats-top-list">
             {topPosts.map((post,index)=><div className="stats-top-row" key={post.post_id}>
               <span className="stats-rank">{index+1}</span>
@@ -297,6 +335,22 @@ export default function StatsPage() {
             {!topPosts.length&&<div className="empty small-empty">Недостаточно публикаций для рейтинга.</div>}
           </div>
         </section>
+
+        <section className="card stats-benchmark">
+          <div className="card-head"><h2>Benchmark внутри команды</h2><span>сравнение подключённых аккаунтов</span></div>
+          <div className="stats-table stats-table-wide">
+            <div className="stats-row stats-head"><span>Аккаунт</span><span>Площадка</span><span>Posts</span><span>Средние просмотры</span><span>ER (Engagement Rate)</span><span>Success Rate</span><span>Место</span></div>
+            {benchmarkAccounts.map(account=><div className="stats-row" key={account.account_id}><span><strong>{account.name}</strong></span><span>{platformNames[account.platform] ?? account.platform}</span><span>{number(account.published)}</span><span>{number(account.avg_views)}</span><span>{percent(account.engagement_rate)}</span><span>{percent(account.success_rate)}</span><span>#{account.rank}</span></div>)}
+            {!benchmarkAccounts.length&&<div className="empty small-empty">Нужно несколько подключённых аккаунтов и публикаций для benchmark.</div>}
+          </div>
+        </section>
+
+        <section className="stats-two-column">
+          <section className="card"><div className="card-head"><h2>Частые темы</h2><span>{analyzed} публикаций</span></div><div className="topic-cloud">{topics.slice(0,20).map((topic,i)=><span key={topic.term} style={{fontSize:Math.max(12,20-i*0.35)}}>{topic.term} <small>{topic.count}</small></span>)}</div></section>
+          <section className="card"><div className="card-head"><h2>Лучшие темы</h2><span>по средним просмотрам</span></div><div className="stats-detail-list">{bestTopics.slice(0,10).map(topic=><div key={topic.term}><span>{topic.term} · {topic.posts} постов</span><strong>{number(topic.avg_views)}</strong></div>)}{!bestTopics.length&&<div className="empty small-empty">Недостаточно данных.</div>}</div></section>
+        </section>
+
+        <section className="card"><div className="card-head"><h2>Лучшие дни недели</h2><span>по средним просмотрам</span></div><div className="stats-detail-list">{weekdays.slice(0,7).map(day=><div key={day.label}><span>{day.label} · {day.posts} публикаций</span><strong>{number(day.avg_views)}</strong></div>)}{!weekdays.length&&<div className="empty small-empty">Недостаточно данных.</div>}</div></section>
 
         <div className="stats-actions">
           <button className="secondary" onClick={() => window.print()}>Печать / PDF</button>
@@ -310,6 +364,29 @@ export default function StatsPage() {
             {refreshing ? 'Обновляем…' : 'Обновить метрики площадок'}
           </button>
         </div>
+
+        <section className="card notifications-banner" id="notifications-banner">
+          <div className="card-head">
+            <div><h2>Уведомления</h2><span>{notifications.filter(item=>!item.read_at).length} непрочитанных</span></div>
+            <Link className="secondary" href="#notifications-banner">Все здесь</Link>
+          </div>
+          <div className="notification-list">
+            {notifications.slice(0,5).map(item=>
+              <button className={!item.read_at?'notification-row unread':'notification-row'} key={item.id} onClick={()=>void markNotification(item.id)}>
+                <div className="notification-icon">{item.type==='new_comment'?'💬':item.type==='approval_requested'?'✓':item.type==='approval_reviewed'?'⚑':'🔔'}</div>
+                <div><strong>{item.title}</strong><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('ru-RU')}</small></div>
+                {!item.read_at&&<span className="inbox-unread">NEW</span>}
+              </button>
+            )}
+            {!notifications.length&&<div className="empty small-empty">Новых уведомлений нет.</div>}
+          </div>
+          <div className="telegram-notification-explainer"><strong>Telegram-уведомления</strong><span>Можно получать важные события, рубежи просмотров и ежедневный отчёт прямо в Telegram.</span></div>
+          {!telegramLink ? (
+            <button className="primary" disabled={telegramBusy} onClick={()=>void connectTelegramNotifications()}>{telegramBusy?'Готовим ссылку…':'Подключить Telegram-уведомления'}</button>
+          ) : (
+            <div className="telegram-notify-connect"><strong>Откройте бота @{telegramLink.bot_username.replace(/^@/,'')} и нажмите Start</strong><a className="primary telegram-start-link" href={telegramLink.start_url} target="_blank" rel="noreferrer">Открыть Telegram</a><small>Ссылка действует до {new Date(telegramLink.expires_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</small></div>
+          )}
+        </section>
 
         {msg && <div className="auth-message">{msg}</div>}
       </section>
