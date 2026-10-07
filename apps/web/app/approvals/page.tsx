@@ -32,9 +32,10 @@ export default function ApprovalsPage() {
 
   async function load() {
     try {
-      const result=await appRequest<{posts:ApprovalPost[];role:string}>('list-approval-queue');
+      const result=await appRequest<{posts:ApprovalPost[];role:string;enabled?:boolean}>('list-approval-queue');
       setPosts(result.posts??[]);
       setRole(result.role||'');
+      setEnabled(result.enabled !== false);
     } catch(error) {
       setMessage(error instanceof Error?error.message:'Не удалось загрузить согласования');
     }
