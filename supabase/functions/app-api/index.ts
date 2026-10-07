@@ -1945,32 +1945,25 @@ Deno.serve(async (req: Request) => {
               }
             }
 
-            const { data: post, error: postError } = await ctx.admin.from("posts").insert({
-              workspace_id: ctx.workspace.workspace_id,
-              user_id: ctx.user.id,
-              body: text,
-              media: [],
-              status: scheduledAt ? "scheduled" : "draft",
-              scheduled_at: scheduledAt,
-              approval_status: "not_required",
-            }).select("id").single();
-            if (postError) { errors.push("Строка " + (index + 2) + ": " + postError.message); continue; }
-
-            const targetRows = selectedAccounts.map((account:any)=>({
-              post_id: post.id,
-              social_account_id: account.id,
-              platform: account.platform,
-              publication_type: "feed",
-              status: scheduledAt ? "pending" : "waiting",
-            }));
-            const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
-            if (targetError) {
-              await ctx.admin.from("posts").delete().eq("id", post.id).eq("workspace_id", ctx.workspace.workspace_id);
-              errors.push("Строка " + (index + 2) + ": " + targetError.message);
+            const targetPublicationTypes: Record<string,string> = {};
+            const targetAccountIds = selectedAccounts.map((account:any) => {
+              targetPublicationTypes[account.id] = "feed";
+              return account.id;
+            });
+            try {
+              const postId = await savePost(ctx, {
+                text,
+                media: [],
+                status: scheduledAt ? "scheduled" : "draft",
+                scheduled_at: scheduledAt,
+                target_account_ids: targetAccountIds,
+                target_publication_types: targetPublicationTypes,
+              });
+              created.push(postId);
+            } catch (error) {
+              errors.push("Строка " + (index + 2) + ": " + sanitizeExternalError(error));
               continue;
             }
-
-            created.push(post.id);
           }
 
           return json({ ok: true, created, errors: errors.slice(0, 50) });
@@ -2027,27 +2020,20 @@ Deno.serve(async (req: Request) => {
           if (error) throw error;
           const created: string[] = [];
           for (const post of posts ?? []) {
-            const { data: copy, error: copyError } = await ctx.admin.from("posts").insert({
-              workspace_id: ctx.workspace.workspace_id,
-              user_id: ctx.user.id,
-              body: post.body,
-              media: post.media,
+            const targetAccountIds = (post.post_targets ?? []).map((target:any) => target.social_account_id);
+            const targetPublicationTypes: Record<string,string> = {};
+            for (const target of post.post_targets ?? []) {
+              targetPublicationTypes[target.social_account_id] = "feed";
+            }
+            const postId = await savePost(ctx, {
+              text: post.body ?? "",
+              media: post.media ?? [],
               status: "draft",
               scheduled_at: null,
-              approval_status: "not_required",
-            }).select("id").single();
-            if (copyError) throw copyError;
-            const targetRows = (post.post_targets ?? []).map((target: any) => ({
-              post_id: copy.id,
-              social_account_id: target.social_account_id,
-              platform: target.platform,
-              status: "waiting",
-            }));
-            if (targetRows.length) {
-              const { error: targetError } = await ctx.admin.from("post_targets").insert(targetRows);
-              if (targetError) throw targetError;
-            }
-            created.push(copy.id);
+              target_account_ids: targetAccountIds,
+              target_publication_types: targetPublicationTypes,
+            });
+            created.push(postId);
           }
           return json({ ok: true, created });
         }
