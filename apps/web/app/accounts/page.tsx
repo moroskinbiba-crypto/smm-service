@@ -148,7 +148,6 @@ export default function AccountsPage(){
       const r=await appRequest<{mode:'channel';code:string;expires_at:string;bot_username:string;instructions:string}>('telegram-service-start',{mode});
       setTelegramConnect(r);
       const started=Date.now();
-      const code=r.code;
       const modeStartedAt=new Date().toISOString();
       const timer=window.setInterval(async()=>{
         if(Date.now()-started>120000){window.clearInterval(timer);return}
@@ -157,8 +156,8 @@ export default function AccountsPage(){
           const matched=list.find((account:any) =>
             account.platform === 'telegram' &&
             account.status === 'connected' &&
-            ((mode === 'channel' && account.metadata?.connection_method === 'service_bot' && !account.metadata?.business_connection_id) ||
-)
+            account.metadata?.connection_method === 'service_bot' &&
+            !account.metadata?.business_connection_id
           );
           if (matched && new Date(matched.updated_at).getTime() >= new Date(modeStartedAt).getTime()) {
             window.clearInterval(timer);
