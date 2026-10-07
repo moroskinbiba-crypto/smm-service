@@ -191,7 +191,7 @@ export default function Home(){
   async function load(){const [a,g,p]=await Promise.all([
     appRequest<{accounts:SocialAccount[]}>('list-accounts'),
     appRequest<{groups:AccountGroup[]}>('list-account-groups'),
-    appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string}}>('list-posts',range(cursor))
+    appRequest<{posts:ApiPost[];workspace:{workspace_id:string;workspace_name:string;role:string;approvals_enabled?:boolean}}>('list-posts',range(cursor))
   ]);setWorkspaceId(p.workspace.workspace_id);setWorkspaceName(p.workspace.workspace_name);setWorkspaceRole(p.workspace.role||'viewer');setWorkspaceApprovalEnabled(p.workspace.approvals_enabled===true);setAccounts(a.accounts??[]);setGroups(g.groups??[]);setPosts(p.posts??[])}
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:'Не удалось загрузить план'))},[cursor.toISOString().slice(0,7)]);
   const days=useMemo(()=>{if(view==='month'){const f=new Date(cursor.getFullYear(),cursor.getMonth(),1);const off=(f.getDay()+6)%7;const l=new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate();const total=Math.ceil((off+l)/7)*7;return Array.from({length:total},(_,i)=>new Date(cursor.getFullYear(),cursor.getMonth(),i-off+1))}const f=new Date(cursor);const monday=new Date(f);monday.setDate(f.getDate()-((f.getDay()+6)%7));if(view==='week')return Array.from({length:7},(_,i)=>new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+i));return [new Date(cursor)]},[cursor,view]);
