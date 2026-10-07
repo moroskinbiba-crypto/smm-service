@@ -67,6 +67,19 @@ async function authContext(req: Request) {
   if (error) throw error;
   const workspace = Array.isArray(data) ? data[0] : data;
   if (!workspace?.workspace_id) throw new Error("Рабочее пространство не настроено");
+
+  const { data: memberState, error: memberStateError } = await base.admin.from("workspace_members")
+    .select("member_suspended_at,member_suspended_reason")
+    .eq("workspace_id", workspace.workspace_id)
+    .eq("user_id", base.user.id)
+    .maybeSingle();
+  if (memberStateError) throw memberStateError;
+  if (memberState?.member_suspended_at) {
+    throw Object.assign(
+      new Error(memberState.member_suspended_reason || "Участие в этом рабочем пространстве приостановлено"),
+      { status: 403 },
+    );
+  }
   return { ...base, workspace };
 }
 
