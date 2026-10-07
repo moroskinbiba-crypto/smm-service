@@ -3,10 +3,10 @@
 Онлайн-платформа автопостинга в Telegram, VK, MAX и Одноклассники. Instagram — следующим этапом.
 
 ## Production architecture
-- Web: Next.js on Netlify during the current access test; Vercel remains the previous deployment target
+- Web: Next.js on Vercel (production target); Netlify configuration removed from the repository
 - Auth/DB/Storage/Functions: Supabase
 - Scheduler: pg_cron + pg_net + Supabase Edge Function
-- Secrets: Supabase Vault
+- Secrets: Supabase Vault for encryption material; provider tokens are kept server-side
 - Social integrations: отдельные platform adapters
 
 ## MVP
