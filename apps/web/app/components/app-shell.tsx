@@ -10,7 +10,7 @@ import { appRequest } from '../../lib/app-api';
 type Workspace = { workspace_id: string; workspace_name: string; workspace_timezone: string; role: string; workspace_kind?: 'personal'|'team'; max_members?: number; member_count?: number; approvals_enabled?: boolean };
 type WorkspaceOption = Workspace;
 
-export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'team' | 'admin'; children: ReactNode }) {
+export function AppShell({ active, children }: { active: 'plan' | 'accounts' | 'stats' | 'inbox' | 'approvals' | 'team' | 'admin' | 'recurrences' | 'competitors' | 'content' | 'notifications' | 'automation' | 'media'; children: ReactNode }) {
   const pathname = usePathname();
   const supabase = createClient();
   const [theme, setTheme] = useState<'light'|'dark'>('light');
