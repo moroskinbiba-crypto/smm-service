@@ -91,7 +91,7 @@ export default function AuthPage() {
   return (
     <main className="shell">
       <section className="auth-card">
-        <div className="brand"><span className="brand-mark">S</span><span>SMM Service</span></div>
+        <div className="brand"><span className="brand-mark">T</span><span>TGRML posting</span></div>
         <div className="eyebrow">АККАУНТ</div>
         <h1>{mode === 'login' ? 'Вход' : 'Регистрация'}</h1>
         <p className="auth-subtitle">Единый кабинет для управления публикациями.</p>
