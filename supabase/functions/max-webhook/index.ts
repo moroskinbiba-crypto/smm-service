@@ -74,6 +74,12 @@ async function claimRequest(admin: any, update: any, code: string) {
   const token = Deno.env.get("MAX_CONNECT_BOT_TOKEN") ?? "";
   if (!token) throw new Error("MAX_CONNECT_BOT_TOKEN is not configured");
 
+  const membership = await maxRequest("/chats/" + encodeURIComponent(String(chatId)) + "/members/me", token);
+  if (membership?.is_admin !== true) throw new Error("Служебный MAX-бот не является администратором этого канала/чата");
+  const permissions = Array.isArray(membership?.permissions) ? membership.permissions : [];
+  if (!permissions.includes("write") && !permissions.includes("post_edit_delete_message")) {
+    throw new Error("Служебному MAX-боту не выдано право публикации");
+  }
   const chat = await maxRequest("/chats/" + encodeURIComponent(String(chatId)), token).catch(() => ({}));
   const title = chat.title || chat.name || "MAX";
 
@@ -95,11 +101,6 @@ async function claimRequest(admin: any, update: any, code: string) {
   if (accountError) throw accountError;
 
   try {
-    await admin.rpc("upsert_social_account_secret", {
-      p_social_account_id: account.id,
-      p_access_token: token,
-    });
-
     const { error: updateError } = await admin.from("social_accounts")
       .update({ status: "connected", last_error: null, updated_at: new Date().toISOString() })
       .eq("id", account.id);
@@ -135,10 +136,9 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return response({ ok: false, error: "Method not allowed" }, 405);
 
   const expectedSecret = Deno.env.get("MAX_WEBHOOK_SECRET") ?? "";
-  if (expectedSecret) {
-    const provided = req.headers.get("X-Max-Bot-Api-Secret") ?? "";
-    if (provided !== expectedSecret) return response({ ok: false, error: "Unauthorized" }, 401);
-  }
+  if (!expectedSecret) return response({ ok: false, error: "MAX webhook secret is not configured" }, 500);
+  const provided = req.headers.get("X-Max-Bot-Api-Secret") ?? "";
+  if (provided !== expectedSecret) return response({ ok: false, error: "Unauthorized" }, 401);
 
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
