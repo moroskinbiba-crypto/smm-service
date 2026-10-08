@@ -171,7 +171,7 @@ export default function AccountsPage(){
         refresh_token:tokenResult.refresh_token||undefined,
         token_expires_at:tokenExpiresAt,
         external_id:String(tokenResult.user_id),
-        metadata:{connection_method:'user_token',vk_account_type:'personal',oauth_provider:'vkid',vk_device_id:deviceId,vk_scope:tokenResult.scope||config.scope},
+        metadata:{connection_method:'user_token',vk_account_type:'personal',oauth_provider:'vkid',vk_device_id:deviceId,vk_scope:tokenResult.scope||config.scope,vk_redirect_uri:config.redirect_uri},
       });
       setAccounts(v=>[...v,result.account]);
       setMsg('✅ Личная страница VK подключена.');
