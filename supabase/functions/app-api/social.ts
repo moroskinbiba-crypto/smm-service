@@ -479,11 +479,12 @@ export async function okPublish(secret: Secret, groupId: string, body: string, m
 }
 
 
-export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string, publicationType: PublicationType = "feed") {
+export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string, publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!externalPostId) return {};
   if (platform === "vk") {
     if (!secret.access_token) throw new Error("VK token не указан");
-    const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+    const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
+    const ownerId = personal ? externalId.replace(/^-/, "") : (externalId.startsWith("-") ? externalId : "-" + externalId);
     if (publicationType === "clip") {
       const videoId = String(externalPostId).split("_").pop() || String(externalPostId);
       const data = await jsonResponse("https://api.vk.com/method/video.get?" + new URLSearchParams({
