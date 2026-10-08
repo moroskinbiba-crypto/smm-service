@@ -24,6 +24,7 @@ export default function AccountsPage(){
   const [telegramMode,setTelegramMode]=useState<'own_bot'|'service_bot'>('own_bot');
   const [vkMode,setVkMode]=useState<'community'|'personal'>('community');
   const [vkIdBusy,setVkIdBusy]=useState(false);
+  const [vkIdConfig,setVkIdConfig]=useState<{app_id:string;redirect_uri:string;scope:string}|null>(null);
   const [token,setToken]=useState('');
   const [externalId,setExternalId]=useState('');
   const [name,setName]=useState('');
@@ -61,6 +62,11 @@ export default function AccountsPage(){
   },[]);
 
   useEffect(()=>{void finishVkPersonalLogin()},[]);
+  useEffect(()=>{
+    if(platform!=='vk'||vkMode!=='personal') return;
+    void appRequest<{app_id:string;redirect_uri:string;scope:string}>('vk-id-config').then(setVkIdConfig).catch(()=>setVkIdConfig(null));
+  },[platform,vkMode]);
+
 
   useEffect(()=>{
     function onMessage(event:MessageEvent){
@@ -338,7 +344,8 @@ export default function AccountsPage(){
           {platform==='vk'&&vkMode==='personal'&&<div className="oauth-panel">
             <div className="oauth-panel-title">Личная страница через VK ID</div>
             <p>Откроется официальное окно VK ID. После подтверждения TGRML получит пользовательский токен и привяжет вашу личную страницу.</p>
-            <button className="primary" disabled={vkIdBusy||busy} onClick={()=>void startVkPersonalLogin()}>{vkIdBusy?'Открываем VK ID…':'Войти через VK ID'}</button>
+            {vkIdConfig?.redirect_uri&&<div className="section-note"><strong>Trusted Redirect URL:</strong><br/><code>{vkIdConfig.redirect_uri}</code><br/><small>Добавьте этот адрес в настройках Web-приложения VK ID один раз, символ в символ.</small></div>}
+            <button className="primary" disabled={vkIdBusy||busy||!vkIdConfig?.app_id} onClick={()=>void startVkPersonalLogin()}>{vkIdBusy?'Открываем VK ID…':'Войти через VK ID'}</button>
             <details className="connect-faq" open>
               <summary>Что нужно настроить один раз</summary>
               <div className="connect-faq-body">
