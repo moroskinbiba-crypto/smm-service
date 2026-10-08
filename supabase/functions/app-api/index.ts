@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   fetchMetrics,
   healthcheck,
+  vkRefreshToken,
   publish,
   telegramSyncInbox,
   telegramSendInboxReply,
@@ -142,6 +143,35 @@ async function getSecret(admin: any, accountId: string) {
   const { data, error } = await admin.rpc("get_social_account_secret", { p_social_account_id: accountId });
   if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
+}
+
+
+async function ensureFreshVkToken(ctx: any, account: any, storedSecret: any) {
+  if (account?.platform !== "vk") return storedSecret ?? {};
+  const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
+  const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
+  if (!personal || !storedSecret?.refresh_token) return storedSecret ?? {};
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : 0;
+  if (expiresAt && expiresAt > Date.now() + 2 * 60 * 1000) return storedSecret;
+  const refreshed = await vkRefreshToken(storedSecret, metadata);
+  const expiresIso = refreshed.expires_in > 0 ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : null;
+  await ctx.admin.rpc("upsert_social_account_secret", {
+    p_social_account_id: account.id,
+    p_access_token: refreshed.access_token,
+    p_refresh_token: refreshed.refresh_token,
+    p_expires_at: expiresIso,
+    p_client_secret: storedSecret.client_secret || null,
+  });
+  await ctx.admin.from("social_accounts").update({
+    token_expires_at: expiresIso,
+    metadata: { ...metadata, vk_scope: refreshed.scope || metadata.vk_scope || null },
+    updated_at: new Date().toISOString(),
+  }).eq("id", account.id).eq("workspace_id", ctx.workspace.workspace_id);
+  return {
+    ...storedSecret,
+    access_token: refreshed.access_token,
+    refresh_token: refreshed.refresh_token,
+  };
 }
 
 function effectiveSecret(account: any, stored: any) {
@@ -737,7 +767,7 @@ async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
 
 async function syncAccountInbox(ctx: any, account: any) {
   const storedSecret = await getSecret(ctx.admin, account.id);
-  const secret = effectiveSecret(account, storedSecret);
+  const secret = effectiveSecret(account, await ensureFreshVkToken(ctx, account, storedSecret));
   const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
   let result: { items: InboxItem[]; metadata_patch?: Record<string, unknown> } = { items: [] };
 
@@ -756,7 +786,7 @@ async function syncAccountInbox(ctx: any, account: any) {
       result = await telegramSyncInbox(secret ?? {}, metadata);
       break;
     case "vk":
-      result = await vkSyncInbox(secret ?? {}, account.external_id ?? "", targets);
+      result = await vkSyncInbox(secret ?? {}, account.external_id ?? "", targets, metadata);
       break;
     case "max":
       result = await maxSyncInbox(secret ?? {}, account.external_id ?? "", targets);
@@ -844,7 +874,7 @@ async function sendInboxMessage(ctx: any, threadId: string, body: string) {
     const parts = thread.external_thread_id.split(":");
     if (parts.length < 3) throw new Error("Не удалось определить VK-пост");
     const replyTo = latestInbound?.metadata?.vk_comment_id ? String(latestInbound.metadata.vk_comment_id) : null;
-    sent = await vkSendInboxReply(secret ?? {}, parts[1], parts[2], replyTo, text);
+    sent = await vkSendInboxReply(secret ?? {}, parts[1], parts[2], replyTo, text, account.metadata ?? {});
   } else if (account.platform === "max") {
     const isComment = thread.thread_type === "comment";
     const postId = thread.external_thread_id.startsWith("max-comment:") ? thread.external_thread_id.replace("max-comment:", "") : null;
@@ -923,7 +953,8 @@ async function publishPost(ctx: any, postId: string) {
     try {
       const account = await accountRow(ctx.admin, target.social_account_id, ctx.workspace.workspace_id);
       const storedSecret = await getSecret(ctx.admin, account.id);
-      const secret = effectiveSecret(account, storedSecret);
+      const refreshedSecret = await ensureFreshVkToken(ctx, account, storedSecret);
+      const secret = effectiveSecret(account, refreshedSecret);
       const externalPostId = await publish(account.platform as Platform, secret, account.external_id ?? "", post.body ?? "", media as MediaItem[], account.metadata ?? {}, target.publication_type || "feed");
       const { error: confirmError } = await ctx.admin.from("post_targets").update({
         status: "published",
@@ -1535,6 +1566,18 @@ Deno.serve(async (req: Request) => {
           const admins = await jsonResponseForAppApi("https://platform-api2.max.ru/chats/" + encodeURIComponent(chatId) + "/members/me", { headers: { Authorization: token } }).catch(()=>null);
           return json({ ok: true, chat: { chat_id: String(chat.chat_id ?? chat.id ?? chatId), title: chat.title || chat.name || "MAX", type: chat.type || null, bot_member: admins } });
         }
+      case "vk-id-config":
+        {
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const appId = Deno.env.get("VK_ID_APP_ID") ?? "54810074";
+          const configuredRedirect = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
+          const origin = (req.headers.get("origin") || "").replace(/\/$/, "");
+          const redirectUri = configuredRedirect || (origin ? origin + "/accounts" : "");
+          const scope = Deno.env.get("VK_ID_SCOPE") ?? "vkid.personal_info wall photos video";
+          if (!appId) throw new Error("VK ID App ID не настроен");
+          if (!redirectUri) throw new Error("Не удалось определить VK ID Redirect URL");
+          return json({ ok: true, app_id: appId, redirect_uri: redirectUri, scope });
+        }
       case "oauth-meta-start":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
@@ -1696,7 +1739,8 @@ Deno.serve(async (req: Request) => {
         {
           const account = await accountRow(ctx.admin, body.account_id, ctx.workspace.workspace_id);
           const storedSecret = await getSecret(ctx.admin, account.id);
-          const checked = await healthcheck(account.platform as Platform, effectiveSecret(account, storedSecret), account.external_id ?? "", account.metadata ?? {});
+          const freshSecret = await ensureFreshVkToken(ctx, account, storedSecret);
+          const checked = await healthcheck(account.platform as Platform, effectiveSecret(account, freshSecret), account.external_id ?? "", account.metadata ?? {});
           const nextMetadata = checked?.metadata_patch ? { ...(account.metadata ?? {}), ...checked.metadata_patch } : (account.metadata ?? {});
           const { data, error } = await ctx.admin.from("social_accounts").update({
             status: "connected",

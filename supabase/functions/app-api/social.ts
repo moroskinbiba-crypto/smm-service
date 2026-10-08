@@ -176,11 +176,12 @@ export async function maxPublish(secret: Secret, chatId: string, body: string, m
   return String(result.message?.body?.mid ?? result.message?.mid ?? Date.now());
 }
 
-async function vkUploadImages(secret: Secret, groupId: string, media: MediaItem[]) {
+async function vkUploadImages(secret: Secret, ownerId: string, media: MediaItem[], accountType: "community"|"personal") {
   if (!secret.access_token) throw new Error("VK token не указан");
   const attachments: string[] = [];
   for (const item of media.filter(m => m.signed_url)) {
-    const uploadParams = new URLSearchParams({ access_token: secret.access_token, v: "5.199", group_id: groupId.replace(/^-/, "") });
+    const uploadParams = new URLSearchParams({ access_token: secret.access_token, v: "5.199" });
+    if (accountType === "community") uploadParams.set("group_id", ownerId.replace(/^-/, ""));
     const server = await jsonResponse(`https://api.vk.com/method/photos.getWallUploadServer?${uploadParams.toString()}`);
     const uploadUrl = server.response?.upload_url;
     if (!uploadUrl) throw new Error("VK не вернул upload_url");
@@ -191,11 +192,12 @@ async function vkUploadImages(secret: Secret, groupId: string, media: MediaItem[
     const saveParams = new URLSearchParams({
       access_token: secret.access_token,
       v: "5.199",
-      group_id: groupId.replace(/^-/, ""),
       server: String(uploaded.server),
       photo: String(uploaded.photo),
       hash: String(uploaded.hash),
     });
+    if (accountType === "community") saveParams.set("group_id", ownerId.replace(/^-/, ""));
+    else saveParams.set("user_id", ownerId);
     const saved = await jsonResponse(`https://api.vk.com/method/photos.saveWallPhoto?${saveParams.toString()}`);
     const itemSaved = saved.response?.[0];
     if (!itemSaved?.id || !itemSaved?.owner_id) throw new Error("VK не вернул ID сохранённой фотографии");
@@ -204,29 +206,84 @@ async function vkUploadImages(secret: Secret, groupId: string, media: MediaItem[
   return attachments;
 }
 
-export async function vkHealth(secret: Secret, externalId?: string) {
+export async function vkHealth(secret: Secret, externalId?: string, metadata: Record<string, unknown> = {}) {
   if (!secret.access_token) throw new Error("VK token не указан");
+  const accountType = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token" ? "personal" : "community";
+  if (accountType === "personal") {
+    const userId = String(externalId || "").trim();
+    if (!userId) throw new Error("VK user ID не указан");
+    const data = await jsonResponse(`https://api.vk.com/method/users.get?${new URLSearchParams({
+      access_token: secret.access_token,
+      v: "5.199",
+      user_ids: userId,
+      fields: "screen_name,photo_200",
+    }).toString()}`);
+    const user = Array.isArray(data.response) ? data.response[0] : null;
+    if (!user?.id) throw new Error("VK не подтвердил личную страницу");
+    return {
+      display_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || `VK #${user.id}`,
+      username: user.screen_name ? `@${user.screen_name}` : null,
+      metadata_patch: { vk_account_type: "personal" },
+    };
+  }
   const groupId = externalId ? String(externalId).replace(/^-/, "") : "";
   const params = new URLSearchParams({ access_token: secret.access_token, v: "5.199" });
   if (groupId) params.set("group_id", groupId);
   const data = await jsonResponse(`https://api.vk.com/method/groups.getById?${params.toString()}`);
   const group = Array.isArray(data.response) ? data.response[0] : data.response?.groups?.[0];
-  return { display_name: group?.name || (groupId ? `VK #${groupId}` : "VK"), username: group?.screen_name ? `@${group.screen_name}` : null };
+  return { display_name: group?.name || (groupId ? `VK #${groupId}` : "VK"), username: group?.screen_name ? `@${group.screen_name}` : null, metadata_patch: { vk_account_type: "community" } };
 }
 
-async function vkUploadClip(secret: Secret, groupId: string, body: string, item: MediaItem) {
+export async function vkRefreshToken(secret: Secret, metadata: Record<string, unknown> = {}) {
+  if (!secret.refresh_token) throw new Error("VK refresh token не указан");
+  const clientId = Deno.env.get("VK_ID_APP_ID") ?? "";
+  const redirectUri = (typeof metadata.vk_redirect_uri === "string" ? metadata.vk_redirect_uri : "") || Deno.env.get("VK_ID_REDIRECT_URI") || "";
+  const deviceId = typeof metadata.vk_device_id === "string" ? metadata.vk_device_id : "";
+  if (!clientId || !redirectUri || !deviceId) {
+    throw new Error("VK ID refresh не настроен: нужны VK_ID_APP_ID, VK_ID_REDIRECT_URI и device_id");
+  }
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(24)), value => value.toString(16).padStart(2, "0")).join("");
+  const query = new URLSearchParams({
+    grant_type: "refresh_token",
+    redirect_uri: redirectUri,
+    client_id: clientId,
+    device_id: deviceId,
+    state,
+  });
+  const response = await fetch("https://id.vk.ru/oauth2/auth?" + query.toString(), {
+    method: "POST",
+    body: new URLSearchParams({ refresh_token: secret.refresh_token }),
+  });
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch {}
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error_description || data?.error || "VK ID не смог обновить токен");
+  }
+  if (data.state && data.state !== state) throw new Error("VK ID refresh вернул некорректное состояние");
+  if (!data.access_token) throw new Error("VK ID refresh не вернул access_token");
+  return {
+    access_token: String(data.access_token),
+    refresh_token: data.refresh_token ? String(data.refresh_token) : secret.refresh_token,
+    expires_in: Number(data.expires_in ?? 0),
+    user_id: data.user_id ? String(data.user_id) : null,
+    scope: data.scope ? String(data.scope) : null,
+  };
+}
+
+async function vkUploadClip(secret: Secret, ownerId: string, body: string, item: MediaItem, accountType: "community"|"personal") {
   if (!secret.access_token) throw new Error("VK token не указан");
   if (!item.signed_url) throw new Error("У VK-клипа отсутствует ссылка на видео");
   const saveParams = new URLSearchParams({
     access_token: secret.access_token,
     v: "5.199",
-    group_id: groupId,
     name: item.name || "Клип",
     description: body || "",
     wallpost: "0",
     is_private: "0",
     no_comments: "0",
   });
+  if (accountType === "community") saveParams.set("group_id", ownerId.replace(/^-/, ""));
   const saved = await jsonResponse("https://api.vk.com/method/video.save?" + saveParams.toString());
   const response = saved.response ?? {};
   if (!response.upload_url || !response.video_id || response.owner_id === undefined) {
@@ -238,27 +295,28 @@ async function vkUploadClip(secret: Secret, groupId: string, body: string, item:
   return String(response.owner_id) + "_" + String(response.video_id);
 }
 
-export async function vkPublish(secret: Secret, ownerId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed") {
+export async function vkPublish(secret: Secret, ownerId: string, body: string, media: MediaItem[], publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!secret.access_token) throw new Error("VK token не указан");
   if (publicationType === "story") throw new Error("VK Stories пока не подключены в этом проекте");
-  const cleanGroupId = ownerId.replace(/^-/, "");
+  const accountType = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token" ? "personal" : "community";
+  const owner = accountType === "community" ? `-${ownerId.replace(/^-/, "")}` : ownerId.replace(/^-/, "");
   const images = media.filter(m => !m.type?.startsWith("video/"));
   const videos = media.filter(m => m.type?.startsWith("video/"));
 
   if (publicationType === "clip") {
     if (videos.length !== 1 || media.length !== 1) throw new Error("VK Клип требует ровно один видеофайл");
-    return vkUploadClip(secret, cleanGroupId, body, videos[0]);
+    return vkUploadClip(secret, owner, body, videos[0], accountType);
   }
 
   if (videos.length) throw new Error("Для видео VK выберите формат «Клип»");
-  const attachments = images.length ? await vkUploadImages(secret, cleanGroupId, images) : [];
+  const attachments = images.length ? await vkUploadImages(secret, owner, images, accountType) : [];
   const params = new URLSearchParams({
     access_token: secret.access_token,
     v: "5.199",
-    owner_id: ownerId.startsWith("-") ? ownerId : `-${ownerId}`,
-    from_group: "1",
+    owner_id: owner,
     message: body || " ",
   });
+  if (accountType === "community") params.set("from_group", "1");
   if (attachments.length) params.set("attachments", attachments.join(","));
   const result = await jsonResponse("https://api.vk.com/method/wall.post?" + params.toString());
   return String(result.response?.post_id ?? Date.now());
@@ -421,11 +479,12 @@ export async function okPublish(secret: Secret, groupId: string, body: string, m
 }
 
 
-export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string, publicationType: PublicationType = "feed") {
+export async function fetchMetrics(platform: Platform, secret: Secret, externalId: string, externalPostId: string, publicationType: PublicationType = "feed", metadata: Record<string, unknown> = {}) {
   if (!externalPostId) return {};
   if (platform === "vk") {
     if (!secret.access_token) throw new Error("VK token не указан");
-    const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+    const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
+    const ownerId = personal ? externalId.replace(/^-/, "") : (externalId.startsWith("-") ? externalId : "-" + externalId);
     if (publicationType === "clip") {
       const videoId = String(externalPostId).split("_").pop() || String(externalPostId);
       const data = await jsonResponse("https://api.vk.com/method/video.get?" + new URLSearchParams({
@@ -500,7 +559,7 @@ export async function fetchMetrics(platform: Platform, secret: Secret, externalI
 export async function healthcheck(platform: Platform, secret: Secret, externalId: string, metadata: Record<string, unknown>) {
   switch (platform) {
     case "telegram": return telegramHealth(secret, externalId, metadata);
-    case "vk": return vkHealth(secret, externalId);
+    case "vk": return vkHealth(secret, externalId, metadata);
     case "max": return maxHealth(secret, externalId);
     case "ok": return okHealth(secret, metadata);
     case "instagram": return instagramHealth(secret, externalId);
@@ -510,7 +569,7 @@ export async function healthcheck(platform: Platform, secret: Secret, externalId
 export async function publish(platform: Platform, secret: Secret, externalId: string, body: string, media: MediaItem[], metadata: Record<string, unknown>, publicationType: PublicationType = "feed") {
   switch (platform) {
     case "telegram": return telegramPublish(secret, externalId, body, media, publicationType, metadata);
-    case "vk": return vkPublish(secret, externalId, body, media, publicationType);
+    case "vk": return vkPublish(secret, externalId, body, media, publicationType, metadata);
     case "max": return maxPublish(secret, externalId, body, media, publicationType);
     case "ok": return okPublish(secret, externalId, body, metadata, media, publicationType);
     case "instagram": return instagramPublish(secret, externalId, body, media, publicationType, metadata);
@@ -603,9 +662,10 @@ export async function telegramSendInboxReply(secret: Secret, threadId: string, b
   };
 }
 
-export async function vkSyncInbox(secret: Secret, externalId: string, publishedTargets: Array<{ external_post_id: string; published_at?: string | null }>): Promise<InboxSyncResult> {
+export async function vkSyncInbox(secret: Secret, externalId: string, publishedTargets: Array<{ external_post_id: string; published_at?: string | null }>, metadata: Record<string, unknown> = {}): Promise<InboxSyncResult> {
   if (!secret.access_token) throw new Error("VK token не указан");
-  const ownerId = externalId.startsWith("-") ? externalId : "-" + externalId;
+  const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
+  const ownerId = personal ? externalId.replace(/^-/, "") : (externalId.startsWith("-") ? externalId : "-" + externalId);
   const items: InboxItem[] = [];
 
   for (const target of publishedTargets.slice(-30)) {
@@ -651,12 +711,13 @@ export async function vkSyncInbox(secret: Secret, externalId: string, publishedT
   return { items };
 }
 
-export async function vkSendInboxReply(secret: Secret, ownerId: string, postId: string, replyToCommentId: string | null, body: string) {
+export async function vkSendInboxReply(secret: Secret, ownerId: string, postId: string, replyToCommentId: string | null, body: string, metadata: Record<string, unknown> = {}) {
   if (!secret.access_token) throw new Error("VK token не указан");
+  const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
   const params = new URLSearchParams({
     access_token: secret.access_token,
     v: "5.199",
-    owner_id: ownerId.startsWith("-") ? ownerId : "-" + ownerId,
+    owner_id: personal ? ownerId.replace(/^-/, "") : (ownerId.startsWith("-") ? ownerId : "-" + ownerId),
     post_id: postId,
     message: body,
   });

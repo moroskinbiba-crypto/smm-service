@@ -22,6 +22,9 @@ export default function AccountsPage(){
   const [platform,setPlatform]=useState<Platform>('telegram');
   const [maxMode,setMaxMode]=useState<'token'|'service_bot'>('token');
   const [telegramMode,setTelegramMode]=useState<'own_bot'|'service_bot'>('own_bot');
+  const [vkMode,setVkMode]=useState<'community'|'personal'>('community');
+  const [vkIdBusy,setVkIdBusy]=useState(false);
+  const [vkIdConfig,setVkIdConfig]=useState<{app_id:string;redirect_uri:string;scope:string}|null>(null);
   const [token,setToken]=useState('');
   const [externalId,setExternalId]=useState('');
   const [name,setName]=useState('');
@@ -58,6 +61,13 @@ export default function AccountsPage(){
     return()=>{cancelled=true;window.clearInterval(timer)};
   },[]);
 
+  useEffect(()=>{void finishVkPersonalLogin()},[]);
+  useEffect(()=>{
+    if(platform!=='vk'||vkMode!=='personal') return;
+    void appRequest<{app_id:string;redirect_uri:string;scope:string}>('vk-id-config').then(setVkIdConfig).catch(()=>setVkIdConfig(null));
+  },[platform,vkMode]);
+
+
   useEffect(()=>{
     function onMessage(event:MessageEvent){
       if(event.origin!==window.location.origin||event.data?.type!=='smm-oauth-callback')return;
@@ -86,12 +96,102 @@ export default function AccountsPage(){
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось открыть OAuth')}finally{setOauthLoading('')}
   }
 
+  function randomString(length:number){
+    const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+    const bytes=new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes,b=>alphabet[b%alphabet.length]).join('');
+  }
+
+  async function startVkPersonalLogin(){
+    setVkIdBusy(true);setMsg('');
+    try{
+      const config=await appRequest<{app_id:string;redirect_uri:string;scope:string}>('vk-id-config');
+      const state=randomString(48);
+      const codeVerifier=randomString(64);
+      sessionStorage.setItem('vkid_state',state);
+      sessionStorage.setItem('vkid_code_verifier',codeVerifier);
+      const VKID=await import('@vkid/sdk');
+      VKID.Config.init({
+        app:Number(config.app_id),
+        redirectUrl:config.redirect_uri,
+        state,
+        codeVerifier,
+        scope:config.scope,
+        mode:VKID.ConfigAuthMode.Redirect,
+        responseMode:VKID.ConfigResponseMode.Redirect,
+      });
+      await VKID.Auth.login();
+    }catch(e){
+      sessionStorage.removeItem('vkid_state');
+      sessionStorage.removeItem('vkid_code_verifier');
+      setMsg(e instanceof Error?e.message:'Не удалось открыть VK ID');
+      setVkIdBusy(false);
+    }
+  }
+
+  async function finishVkPersonalLogin(){
+    const params=new URLSearchParams(window.location.search);
+    const code=params.get('code');
+    const deviceId=params.get('device_id');
+    const responseType=params.get('type');
+    const error=params.get('error');
+    if(!code&&!error) return;
+    if(error){
+      window.history.replaceState({},document.title,window.location.pathname);
+      sessionStorage.removeItem('vkid_state');
+      sessionStorage.removeItem('vkid_code_verifier');
+      setMsg(params.get('error_description')||error);
+      return;
+    }
+    if(!code||!deviceId||responseType!=='code_v2') return;
+    setVkIdBusy(true);setMsg('Завершаем вход VK ID…');
+    try{
+      const config=await appRequest<{app_id:string;redirect_uri:string;scope:string}>('vk-id-config');
+      const state=sessionStorage.getItem('vkid_state')||'';
+      const codeVerifier=sessionStorage.getItem('vkid_code_verifier')||'';
+      if(!state||!codeVerifier) throw new Error('Сессия VK ID потеряна. Запустите подключение ещё раз.');
+      const VKID=await import('@vkid/sdk');
+      VKID.Config.init({
+        app:Number(config.app_id),
+        redirectUrl:config.redirect_uri,
+        state,
+        codeVerifier,
+        scope:config.scope,
+        mode:VKID.ConfigAuthMode.Redirect,
+        responseMode:VKID.ConfigResponseMode.Redirect,
+      });
+      const tokenResult=await VKID.Auth.exchangeCode(code,deviceId,codeVerifier);
+      if(!tokenResult.access_token||!tokenResult.user_id) throw new Error('VK ID не вернул пользовательский токен');
+      const expiresIn=Number(tokenResult.expires_in||0);
+      const tokenExpiresAt=expiresIn>0?new Date(Date.now()+expiresIn*1000).toISOString():undefined;
+      const result=await appRequest<{account:SocialAccount}>('connect-account',{
+        platform:'vk',
+        access_token:tokenResult.access_token,
+        refresh_token:tokenResult.refresh_token||undefined,
+        token_expires_at:tokenExpiresAt,
+        external_id:String(tokenResult.user_id),
+        metadata:{connection_method:'user_token',vk_account_type:'personal',oauth_provider:'vkid',vk_device_id:deviceId,vk_scope:tokenResult.scope||config.scope,vk_redirect_uri:config.redirect_uri},
+      });
+      setAccounts(v=>[...v,result.account]);
+      setMsg('✅ Личная страница VK подключена.');
+      window.history.replaceState({},document.title,window.location.pathname);
+      sessionStorage.removeItem('vkid_state');
+      sessionStorage.removeItem('vkid_code_verifier');
+    }catch(e){
+      setMsg(e instanceof Error?e.message:'VK ID авторизация не завершилась');
+      window.history.replaceState({},document.title,window.location.pathname);
+      sessionStorage.removeItem('vkid_state');
+      sessionStorage.removeItem('vkid_code_verifier');
+    }finally{setVkIdBusy(false)}
+  }
+
   async function connectManual(){
     setBusy(true);setMsg('');
     try{
       const metadata:any={};
       if(platform==='ok'){metadata.application_key=appKey;metadata.group_id=externalId}
-      if(platform==='vk'){metadata.connection_method='community_token'}
+      if(platform==='vk'){metadata.connection_method='community_token';metadata.vk_account_type='community'}
       const r=await appRequest<{account:SocialAccount}>('connect-account',{
         platform,
         access_token:token,
@@ -233,6 +333,28 @@ export default function AccountsPage(){
           <div className="card-head"><h2>Добавить аккаунт</h2><span>секреты хранятся зашифрованно</span></div>
           <div className="platform-tabs">{Object.entries(meta).map(([id,v])=><button key={id} className={platform===id?'platform-tab active':'platform-tab'} onClick={()=>setPlatform(id as Platform)}><b className={'network-logo network-logo-'+id}>{v.icon}</b>{v.name}</button>)}</div>
 
+          {platform==='vk'&&<div className="max-connect-choice">
+            <div className="connection-method-heading"><strong>Какой VK подключить</strong><small>Сообщество или личная страница</small></div>
+            <div className="max-method-tabs">
+              <button className={vkMode==='community'?'max-method active':'max-method'} onClick={()=>setVkMode('community')}><strong>1. Сообщество VK</strong><small>Ключ доступа конкретного сообщества. OAuth не нужен.</small></button>
+              <button className={vkMode==='personal'?'max-method active':'max-method'} onClick={()=>setVkMode('personal')}><strong>2. Личная страница</strong><small>Вход через официальный VK ID. Токен вручную вводить не нужно.</small></button>
+            </div>
+          </div>}
+
+          {platform==='vk'&&vkMode==='personal'&&<div className="oauth-panel">
+            <div className="oauth-panel-title">Личная страница через VK ID</div>
+            <p>Откроется официальное окно VK ID. После подтверждения TGRML получит пользовательский токен и привяжет вашу личную страницу.</p>
+            {vkIdConfig?.redirect_uri&&<div className="section-note"><strong>Trusted Redirect URL:</strong><br/><code>{vkIdConfig.redirect_uri}</code><br/><small>Добавьте этот адрес в настройках Web-приложения VK ID один раз, символ в символ.</small></div>}
+            <button className="primary" disabled={vkIdBusy||busy||!vkIdConfig?.app_id} onClick={()=>void startVkPersonalLogin()}>{vkIdBusy?'Открываем VK ID…':'Войти через VK ID'}</button>
+            <details className="connect-faq" open>
+              <summary>Что нужно настроить один раз</summary>
+              <div className="connect-faq-body">
+                <p>В кабинете VK ID создаётся Web-приложение и добавляется доверенный Redirect URL, который TGRML даст в настройках подключения.</p>
+                <p>Для публикаций нужны права VK API, прежде всего <b>wall</b>. Для изображений и клипов понадобятся также <b>photos</b> и <b>video</b>.</p>
+              </div>
+            </details>
+          </div>}
+
           {platform==='instagram'&&<div className="oauth-panel">
             <div className="oauth-panel-title">Подключение через Meta</div>
             <p>Откроется окно входа Meta. После входа выберите нужный профессиональный Instagram-аккаунт.</p>
@@ -279,7 +401,7 @@ export default function AccountsPage(){
             </div>
           </div>}
 
-          {platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&<>
+          {platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&!(platform==='vk'&&vkMode==='personal')&&<>
             <p className="section-copy">{meta[platform].help}</p>
             <label>{platform==='vk'?'Ключ доступа сообщества':'Токен доступа'}<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder={platform==='vk'?'Вставьте ключ из настроек сообщества':'Вставьте токен'}/></label>
             <label>{platform==='max'?'Chat ID':platform==='vk'?'ID сообщества':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
