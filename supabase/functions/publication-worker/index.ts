@@ -31,6 +31,45 @@ function effectiveSecret(account: any, stored: any) {
   return stored ?? {};
 }
 
+async function refreshVkToken(admin: any, account: any, stored: any) {
+  if (account?.platform !== "vk") return stored ?? {};
+  const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
+  const personal = metadata.vk_account_type === "personal" || metadata.connection_method === "user_token";
+  if (!personal || !stored?.refresh_token) return stored ?? {};
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : 0;
+  if (expiresAt && expiresAt > Date.now() + 2 * 60 * 1000) return stored;
+  const clientId = Deno.env.get("VK_ID_APP_ID") ?? "";
+  const redirectUri = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
+  const deviceId = typeof metadata.vk_device_id === "string" ? metadata.vk_device_id : "";
+  if (!clientId || !redirectUri || !deviceId) throw new Error("VK ID refresh не настроен");
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(24)), value => value.toString(16).padStart(2, "0")).join("");
+  const query = new URLSearchParams({ grant_type: "refresh_token", redirect_uri: redirectUri, client_id: clientId, device_id: deviceId, state });
+  const response = await fetch("https://id.vk.ru/oauth2/auth?" + query.toString(), {
+    method: "POST",
+    body: new URLSearchParams({ refresh_token: stored.refresh_token }),
+  });
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch {}
+  if (!response.ok || data?.error || !data?.access_token) throw new Error(data?.error_description || data?.error || "VK ID не смог обновить токен");
+  if (data.state && data.state !== state) throw new Error("VK ID refresh вернул некорректное состояние");
+  const expiresIso = Number(data.expires_in ?? 0) > 0 ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString() : null;
+  const nextRefresh = data.refresh_token ? String(data.refresh_token) : stored.refresh_token;
+  await admin.rpc("upsert_social_account_secret", {
+    p_social_account_id: account.id,
+    p_access_token: String(data.access_token),
+    p_refresh_token: nextRefresh,
+    p_expires_at: expiresIso,
+    p_client_secret: stored.client_secret || null,
+  });
+  await admin.from("social_accounts").update({
+    token_expires_at: expiresIso,
+    metadata: { ...metadata, vk_scope: data.scope ? String(data.scope) : metadata.vk_scope || null },
+    updated_at: new Date().toISOString(),
+  }).eq("id", account.id);
+  return { ...stored, access_token: String(data.access_token), refresh_token: nextRefresh };
+}
+
 function isRetryablePublishError(error: unknown) {
   const message = sanitizeExternalError(error);
   if (/(\b400\b|\b401\b|\b403\b|\b404\b|invalid|unauthorized|forbidden|permission|не найден|неверн|слишком длин|too long|unsupported|not allowed|token)/i.test(message)) {
@@ -208,7 +247,8 @@ Deno.serve(async (req: Request) => {
         const account = target.social_accounts;
         const post = target.posts;
         const storedSecret = await getSecret(supabase, account.id);
-        const secret = effectiveSecret(account, storedSecret);
+        const refreshedSecret = await refreshVkToken(supabase, account, storedSecret);
+        const secret = effectiveSecret(account, refreshedSecret);
         const media = await signedMedia(supabase, post.media, post.workspace_id);
         const externalPostId = await publish(
           account.platform,
