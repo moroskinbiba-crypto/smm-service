@@ -767,7 +767,7 @@ async function upsertInboxItems(ctx: any, account: any, items: InboxItem[]) {
 
 async function syncAccountInbox(ctx: any, account: any) {
   const storedSecret = await getSecret(ctx.admin, account.id);
-  const secret = effectiveSecret(account, storedSecret);
+  const secret = effectiveSecret(account, await ensureFreshVkToken(ctx, account, storedSecret));
   const metadata = account.metadata && typeof account.metadata === "object" ? account.metadata : {};
   let result: { items: InboxItem[]; metadata_patch?: Record<string, unknown> } = { items: [] };
 
