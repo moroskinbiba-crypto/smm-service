@@ -301,7 +301,7 @@ export default function AccountsPage(){
                 </>}
                 {platform==='ok'&&<><p>Используйте OAuth access token, application key/secret и ID группы.</p><a href="https://apiok.ru/" target="_blank" rel="noreferrer">Официальная документация OK →</a></>}
                 {platform==='max'&&<><p>Создайте MAX business-бота, получите токен и добавьте бота администратором в канал.</p><a href="https://dev.max.ru/docs-api" target="_blank" rel="noreferrer">Официальная документация MAX →</a></>}
-              </div>        </div>
+              </div>
             </details>
             <button className="primary" disabled={busy||!token||!externalId} onClick={()=>void connectManual()}>{busy?'Проверяем и подключаем…':'Подключить аккаунт'}</button>
           </>}
