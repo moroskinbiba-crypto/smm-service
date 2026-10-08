@@ -256,6 +256,7 @@ export async function vkPublish(secret: Secret, ownerId: string, body: string, m
     access_token: secret.access_token,
     v: "5.199",
     owner_id: ownerId.startsWith("-") ? ownerId : `-${ownerId}`,
+    from_group: "1",
     message: body || " ",
   });
   if (attachments.length) params.set("attachments", attachments.join(","));
