@@ -1568,12 +1568,14 @@ Deno.serve(async (req: Request) => {
         }
       case "vk-id-config":
         {
-          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
-          const appId = Deno.env.get("VK_ID_APP_ID") ?? "";
-          const redirectUri = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
-          const scope = Deno.env.get("VK_ID_SCOPE") ?? "vkid.personal_info wall photos video offline";
-          await requireOAuthConfig("VK_ID_APP_ID", appId);
-          await requireOAuthConfig("VK_ID_REDIRECT_URI", redirectUri);
+          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
+          const appId = Deno.env.get("VK_ID_APP_ID") ?? "54810074";
+          const configuredRedirect = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
+          const origin = (req.headers.get("origin") || "").replace(/\/$/, "");
+          const redirectUri = configuredRedirect || (origin ? origin + "/accounts" : "");
+          const scope = Deno.env.get("VK_ID_SCOPE") ?? "vkid.personal_info wall photos video";
+          if (!appId) throw new Error("VK ID App ID не настроен");
+          if (!redirectUri) throw new Error("Не удалось определить VK ID Redirect URL");
           return json({ ok: true, app_id: appId, redirect_uri: redirectUri, scope });
         }
       case "oauth-meta-start":
