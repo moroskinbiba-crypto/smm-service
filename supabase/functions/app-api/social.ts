@@ -234,6 +234,43 @@ export async function vkHealth(secret: Secret, externalId?: string, metadata: Re
   return { display_name: group?.name || (groupId ? `VK #${groupId}` : "VK"), username: group?.screen_name ? `@${group.screen_name}` : null, metadata_patch: { vk_account_type: "community" } };
 }
 
+export async function vkRefreshToken(secret: Secret, metadata: Record<string, unknown> = {}) {
+  if (!secret.refresh_token) throw new Error("VK refresh token не указан");
+  const clientId = Deno.env.get("VK_ID_APP_ID") ?? "";
+  const redirectUri = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
+  const deviceId = typeof metadata.vk_device_id === "string" ? metadata.vk_device_id : "";
+  if (!clientId || !redirectUri || !deviceId) {
+    throw new Error("VK ID refresh не настроен: нужны VK_ID_APP_ID, VK_ID_REDIRECT_URI и device_id");
+  }
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(24)), value => value.toString(16).padStart(2, "0")).join("");
+  const query = new URLSearchParams({
+    grant_type: "refresh_token",
+    redirect_uri: redirectUri,
+    client_id: clientId,
+    device_id: deviceId,
+    state,
+  });
+  const response = await fetch("https://id.vk.ru/oauth2/auth?" + query.toString(), {
+    method: "POST",
+    body: new URLSearchParams({ refresh_token: secret.refresh_token }),
+  });
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch {}
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error_description || data?.error || "VK ID не смог обновить токен");
+  }
+  if (data.state && data.state !== state) throw new Error("VK ID refresh вернул некорректное состояние");
+  if (!data.access_token) throw new Error("VK ID refresh не вернул access_token");
+  return {
+    access_token: String(data.access_token),
+    refresh_token: data.refresh_token ? String(data.refresh_token) : secret.refresh_token,
+    expires_in: Number(data.expires_in ?? 0),
+    user_id: data.user_id ? String(data.user_id) : null,
+    scope: data.scope ? String(data.scope) : null,
+  };
+}
+
 async function vkUploadClip(secret: Secret, ownerId: string, body: string, item: MediaItem, accountType: "community"|"personal") {
   if (!secret.access_token) throw new Error("VK token не указан");
   if (!item.signed_url) throw new Error("У VK-клипа отсутствует ссылка на видео");
