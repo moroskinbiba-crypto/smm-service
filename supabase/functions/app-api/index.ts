@@ -1535,73 +1535,6 @@ Deno.serve(async (req: Request) => {
           const admins = await jsonResponseForAppApi("https://platform-api2.max.ru/chats/" + encodeURIComponent(chatId) + "/members/me", { headers: { Authorization: token } }).catch(()=>null);
           return json({ ok: true, chat: { chat_id: String(chat.chat_id ?? chat.id ?? chatId), title: chat.title || chat.name || "MAX", type: chat.type || null, bot_member: admins } });
         }
-      case "oauth-vk-start":
-        {
-          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
-          const appId = Deno.env.get("VK_APP_ID") ?? "";
-          const redirectUri = Deno.env.get("VK_REDIRECT_URI") ?? "";
-          await requireOAuthConfig("VK_APP_ID", appId);
-          await requireOAuthConfig("VK_REDIRECT_URI", redirectUri);
-          const state = await createOAuthState(ctx, "vk");
-          const params = new URLSearchParams({
-            client_id: appId,
-            display: "page",
-            redirect_uri: redirectUri,
-            scope: "groups,wall,photos,video,stories,offline",
-            response_type: "code",
-            v: "5.199",
-            state,
-          });
-          return json({ ok: true, provider: "vk", url: "https://oauth.vk.com/authorize?" + params.toString() });
-        }
-      case "oauth-vk-complete":
-        {
-          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
-          const code = String(body.code || "");
-          const state = String(body.state || "");
-          if (!code || !state) throw new Error("VK OAuth не вернул code/state");
-          await consumeOAuthState(ctx, "vk", state);
-          const appId = Deno.env.get("VK_APP_ID") ?? "";
-          const appSecret = Deno.env.get("VK_APP_SECRET") ?? "";
-          const redirectUri = Deno.env.get("VK_REDIRECT_URI") ?? "";
-          await requireOAuthConfig("VK_APP_ID", appId);
-          await requireOAuthConfig("VK_APP_SECRET", appSecret);
-          await requireOAuthConfig("VK_REDIRECT_URI", redirectUri);
-
-          const tokenResponse = await fetch("https://oauth.vk.com/access_token?" + new URLSearchParams({
-            client_id: appId,
-            client_secret: appSecret,
-            redirect_uri: redirectUri,
-            code,
-          }).toString());
-          const tokenText = await tokenResponse.text();
-          let tokenData: any = {};
-          try { tokenData = tokenText ? JSON.parse(tokenText) : {}; } catch { tokenData = {}; }
-          if (!tokenResponse.ok || tokenData.error) throw new Error(tokenData.error_description || tokenData.error || "VK не выдал токен");
-
-          const accessToken = String(tokenData.access_token || "");
-          if (!accessToken) throw new Error("VK не выдал access token");
-          const groups = await jsonResponseForAppApi("https://api.vk.com/method/groups.get?" + new URLSearchParams({
-            access_token: accessToken,
-            v: "5.199",
-            filter: "admin",
-            extended: "1",
-            fields: "name,screen_name,photo_100",
-            count: "500",
-          }).toString());
-
-          return json({
-            ok: true,
-            provider: "vk",
-            access_token: accessToken,
-            groups: Array.isArray(groups.response?.items) ? groups.response.items.map((group:any)=>({
-              id: String(group.id),
-              name: group.name,
-              screen_name: group.screen_name ?? null,
-              photo_100: group.photo_100 ?? null,
-            })) : [],
-          });
-        }
       case "oauth-meta-start":
         {
           if (!canManageAccounts(ctx.workspace.role)) throw new Error("Подключать аккаунты может только руководитель");
@@ -1665,44 +1598,6 @@ Deno.serve(async (req: Request) => {
           }
 
           return json({ ok: true, provider: "meta", accounts });
-        }
-      case "oauth-connect-vk":
-        {
-          if (!canManageAccounts(ctx.workspace.role)) throw new Error("Недостаточно прав");
-          const accessToken = String(body.access_token || "").trim();
-          const groupId = String(body.group_id || "").trim();
-          if (!accessToken || !groupId) throw new Error("Не выбран аккаунт VK");
-          const metadata = { oauth: true, oauth_provider: "vk" };
-          const { data: account, error: accountError } = await ctx.admin.from("social_accounts").insert({
-            user_id: ctx.user.id,
-            workspace_id: ctx.workspace.workspace_id,
-            platform: "vk",
-            external_id: groupId,
-            display_name: body.group_name || null,
-            username: body.group_screen_name ? "@" + String(body.group_screen_name).replace(/^@/, "") : null,
-            status: "pending",
-            metadata,
-          }).select("id").single();
-          if (accountError) throw accountError;
-          try {
-            await ctx.admin.rpc("upsert_social_account_secret", { p_social_account_id: account.id, p_access_token: accessToken });
-            const storedSecret = await getSecret(ctx.admin, account.id);
-  const secret = effectiveSecret(account, storedSecret);
-            const checked = await healthcheck("vk", secret ?? {}, groupId, metadata);
-            const { data: updated, error: updateError } = await ctx.admin.from("social_accounts").update({
-              status: "connected",
-              last_error: null,
-              display_name: body.group_name || checked.display_name || null,
-              username: body.group_screen_name ? "@" + String(body.group_screen_name).replace(/^@/, "") : checked.username || null,
-              updated_at: new Date().toISOString(),
-            }).eq("id", account.id).select("*").single();
-            if (updateError) throw updateError;
-            return json({ ok: true, account: updated });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            await ctx.admin.from("social_accounts").update({ status: "error", last_error: message }).eq("id", account.id);
-            throw new Error(message);
-          }
         }
       case "oauth-connect-meta":
         {
