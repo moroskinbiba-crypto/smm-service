@@ -144,7 +144,7 @@ export default function AccountsPage(){
       setMsg(params.get('error_description')||error);
       return;
     }
-    if(!code||!deviceId||responseType!=='code') return;
+    if(!code||!deviceId||responseType!=='code_v2') return;
     setVkIdBusy(true);setMsg('Завершаем вход VK ID…');
     try{
       const config=await appRequest<{app_id:string;redirect_uri:string;scope:string}>('vk-id-config');
