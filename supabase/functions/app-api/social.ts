@@ -237,7 +237,7 @@ export async function vkHealth(secret: Secret, externalId?: string, metadata: Re
 export async function vkRefreshToken(secret: Secret, metadata: Record<string, unknown> = {}) {
   if (!secret.refresh_token) throw new Error("VK refresh token не указан");
   const clientId = Deno.env.get("VK_ID_APP_ID") ?? "";
-  const redirectUri = Deno.env.get("VK_ID_REDIRECT_URI") ?? "";
+  const redirectUri = (typeof metadata.vk_redirect_uri === "string" ? metadata.vk_redirect_uri : "") || Deno.env.get("VK_ID_REDIRECT_URI") || "";
   const deviceId = typeof metadata.vk_device_id === "string" ? metadata.vk_device_id : "";
   if (!clientId || !redirectUri || !deviceId) {
     throw new Error("VK ID refresh не настроен: нужны VK_ID_APP_ID, VK_ID_REDIRECT_URI и device_id");
