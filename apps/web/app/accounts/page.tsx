@@ -8,13 +8,12 @@ type Platform='telegram'|'vk'|'max'|'ok'|'instagram';
 
 const meta: Record<Platform,{name:string;icon:string;help:string}> = {
   telegram:{name:'Telegram',icon:'➤',help:'Подключите Telegram-канал для обычных публикаций. Личные уведомления подключаются отдельно через Telegram-бота.'},
-  vk:{name:'VK',icon:'vk',help:'Удобнее войти через VK OAuth и выбрать нужное сообщество прямо в сервисе.'},
+  vk:{name:'VK',icon:'vk',help:'Подключается напрямую ключом доступа самого сообщества. OAuth не нужен.'},
   max:{name:'MAX',icon:'M',help:'Два способа: токен вашего бота или подключение через служебного бота, добавленного в канал.'},
   ok:{name:'Одноклассники',icon:'OK',help:'OAuth access token + application key/secret + ID группы.'},
   instagram:{name:'Instagram',icon:'◎',help:'Подключаются профессиональные Instagram-аккаунты через Meta и можно выбрать нужный аккаунт.'},
 };
 
-type VkCandidate={id:string;name:string;screen_name:string|null;photo_100:string|null};
 type MetaCandidate={page_id:string;page_name:string;page_access_token:string;instagram_id:string;instagram_username:string|null;instagram_name:string|null;profile_picture_url:string|null;account_type:string|null};
 type AccountGroup={id:string;name:string;description:string|null;account_ids:string[]};
 
@@ -31,8 +30,6 @@ export default function AccountsPage(){
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState('');
   const [oauthLoading,setOauthLoading]=useState('');
-  const [vkCandidates,setVkCandidates]=useState<VkCandidate[]>([]);
-  const [vkToken,setVkToken]=useState('');
   const [metaCandidates,setMetaCandidates]=useState<MetaCandidate[]>([]);
   const [oauthProvider,setOauthProvider]=useState<'vk'|'meta'|null>(null);
   const [maxConnect,setMaxConnect]=useState<{code:string;expires_at:string;bot_username:string;instructions:string}|null>(null);
@@ -68,12 +65,7 @@ export default function AccountsPage(){
       if(p.error){setMsg(p.error_description||p.error);return}
       void (async()=>{
         try{
-          if(p.provider==='vk'){
-            const result=await appRequest<{access_token:string;groups:VkCandidate[]}>('oauth-vk-complete',{code:p.code,state:p.state});
-            setVkToken(result.access_token);
-            setVkCandidates(result.groups||[]);
-            setOauthProvider('vk');
-          }else if(p.provider==='meta'){
+          if(p.provider==='meta'){
             const result=await appRequest<{accounts:MetaCandidate[]}>('oauth-meta-complete',{code:p.code,state:p.state});
             setMetaCandidates(result.accounts||[]);
             setOauthProvider('meta');
@@ -85,11 +77,10 @@ export default function AccountsPage(){
     return()=>window.removeEventListener('message',onMessage);
   },[]);
 
-  async function openOAuth(provider:'vk'|'meta'){
+  async function openOAuth(provider:'meta'){
     setOauthLoading(provider);setMsg('');
     try{
-      const action=provider==='vk'?'oauth-vk-start':'oauth-meta-start';
-      const r=await appRequest<{url:string}>(action);
+      const r=await appRequest<{url:string}>('oauth-meta-start');
       const popup=window.open(r.url,'smm-oauth','width=620,height=760,resizable=yes,scrollbars=yes');
       if(!popup) throw new Error('Браузер заблокировал popup. Разрешите всплывающие окна для сервиса.');
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось открыть OAuth')}finally{setOauthLoading('')}
@@ -100,6 +91,7 @@ export default function AccountsPage(){
     try{
       const metadata:any={};
       if(platform==='ok'){metadata.application_key=appKey;metadata.group_id=externalId}
+      if(platform==='vk'){metadata.connection_method='community_token'}
       const r=await appRequest<{account:SocialAccount}>('connect-account',{
         platform,
         access_token:token,
@@ -111,19 +103,6 @@ export default function AccountsPage(){
       setAccounts(v=>[...v,r.account]);
       setToken('');setExternalId('');setName('');setAppKey('');setAppSecret('');
     }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить')}finally{setBusy(false)}
-  }
-
-  async function connectVk(group:VkCandidate){
-    setBusy(true);setMsg('');
-    try{
-      const r=await appRequest<{account:SocialAccount}>('oauth-connect-vk',{
-        access_token:vkToken,
-        group_id:group.id,
-        group_name:group.name,
-        group_screen_name:group.screen_name,
-      });
-      setAccounts(v=>[...v,r.account]);setOauthProvider(null);setVkCandidates([]);setVkToken('');
-    }catch(e){setMsg(e instanceof Error?e.message:'Не удалось подключить сообщество VK')}finally{setBusy(false)}
   }
 
   async function connectInstagram(item:MetaCandidate){
@@ -254,12 +233,6 @@ export default function AccountsPage(){
           <div className="card-head"><h2>Добавить аккаунт</h2><span>секреты хранятся зашифрованно</span></div>
           <div className="platform-tabs">{Object.entries(meta).map(([id,v])=><button key={id} className={platform===id?'platform-tab active':'platform-tab'} onClick={()=>setPlatform(id as Platform)}><b className={'network-logo network-logo-'+id}>{v.icon}</b>{v.name}</button>)}</div>
 
-          {platform==='vk'&&<div className="oauth-panel">
-            <div className="oauth-panel-title">Удобное подключение VK</div>
-            <p>Войдите через VK и выберите сообщество, которым вы управляете. Токен копировать не нужно.</p>
-            <button className="primary" disabled={oauthLoading==='vk'} onClick={()=>void openOAuth('vk')}>{oauthLoading==='vk'?'Открываем VK…':'Войти через VK и выбрать сообщество'}</button>
-          </div>}
-
           {platform==='instagram'&&<div className="oauth-panel">
             <div className="oauth-panel-title">Подключение через Meta</div>
             <p>Откроется окно входа Meta. После входа выберите нужный профессиональный Instagram-аккаунт.</p>
@@ -306,19 +279,29 @@ export default function AccountsPage(){
             </div>
           </div>}
 
-          {platform!=='vk'&&platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&<>
+          {platform!=='instagram'&&platform!=='telegram'&&!(platform==='max'&&maxMode==='service_bot')&&<>
             <p className="section-copy">{meta[platform].help}</p>
-            <label>Токен доступа<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Вставьте токен"/></label>
-            <label>{platform==='max'?'Chat ID':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
+            <label>{platform==='vk'?'Ключ доступа сообщества':'Токен доступа'}<input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder={platform==='vk'?'Вставьте ключ из настроек сообщества':'Вставьте токен'}/></label>
+            <label>{platform==='max'?'Chat ID':platform==='vk'?'ID сообщества':'ID группы'}<input value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Например, 123456789"/></label>
 
             {platform==='ok'&&<><label>Application key<input value={appKey} onChange={e=>setAppKey(e.target.value)}/></label><label>Application secret<input type="password" value={appSecret} onChange={e=>setAppSecret(e.target.value)}/></label></>}
             <label>Название в сервисе<input value={name} onChange={e=>setName(e.target.value)} placeholder={meta[platform].name}/></label>
             <details className="connect-faq" open>
               <summary>FAQ: как подключить {meta[platform].name}</summary>
               <div className="connect-faq-body">
+                {platform==='vk'&&<>
+                  <p><strong>1.</strong> Откройте нужное сообщество ВКонтакте, где вы являетесь администратором.</p>
+                  <p><strong>2.</strong> Перейдите: <b>Управление → Дополнительно → Работа с API → Ключи доступа</b>.</p>
+                  <p><strong>3.</strong> Нажмите <b>«Создать ключ»</b> и подтвердите создание в VK.</p>
+                  <p><strong>4.</strong> Выдайте ключу права, необходимые для публикаций. Для изображений и видео включите соответствующие <b>photos</b> и <b>video</b>, если VK показывает эти права отдельно.</p>
+                  <p><strong>5.</strong> Скопируйте ключ и вставьте его в поле выше. Сам ключ никому не отправляйте.</p>
+                  <p><strong>6.</strong> Укажите числовой <b>ID сообщества</b> без знака «−». После подключения TGRML проверит ключ и привяжет сообщество.</p>
+                  <p className="section-note">Ключ сообщества действует, пока вы не отзовёте его в VK. Для каждого сообщества нужен свой ключ.</p>
+                  <a href="https://dev.vk.com/ru/api/access-token/community-token" target="_blank" rel="noreferrer">Официальная инструкция VK по ключам доступа сообщества →</a>
+                </>}
                 {platform==='ok'&&<><p>Используйте OAuth access token, application key/secret и ID группы.</p><a href="https://apiok.ru/" target="_blank" rel="noreferrer">Официальная документация OK →</a></>}
                 {platform==='max'&&<><p>Создайте MAX business-бота, получите токен и добавьте бота администратором в канал.</p><a href="https://dev.max.ru/docs-api" target="_blank" rel="noreferrer">Официальная документация MAX →</a></>}
-              </div>
+              </div>        </div>
             </details>
             <button className="primary" disabled={busy||!token||!externalId} onClick={()=>void connectManual()}>{busy?'Проверяем и подключаем…':'Подключить аккаунт'}</button>
           </>}
@@ -348,7 +331,7 @@ export default function AccountsPage(){
             <div className="connect-faq-body"><p>Этот способ требует один раз настроить служебного MAX-бота и Webhook на стороне сервиса. Пользовательский токен не вводится.</p></div>
           </div>}
 
-          {(platform==='vk'||platform==='instagram')&&<details className="connect-faq" open><summary>Как работает вход</summary><div className="connect-faq-body"><p>Сначала открывается отдельное окно авторизации. После входа сервис получает только нужные разрешения, показывает список доступных сообществ/аккаунтов и сохраняет выбранный.</p></div></details>}
+          {platform==='instagram'&&<details className="connect-faq" open><summary>Как работает вход</summary><div className="connect-faq-body"><p>Сначала открывается отдельное окно авторизации Meta. После входа сервис получает только нужные разрешения, показывает доступный профессиональный Instagram-аккаунт и сохраняет выбранный.</p></div></details>}
 
           {platform==='instagram'&&<div className="manual-fallback">
             <details className="connect-faq"><summary>Нужен ручной способ? Подключить токен вручную</summary>
@@ -364,14 +347,12 @@ export default function AccountsPage(){
         </section>
       </div>
 
-      {(oauthProvider==='vk'||oauthProvider==='meta')&&<div className="modal-backdrop" onMouseDown={()=>setOauthProvider(null)}>
+      {oauthProvider==='meta'&&<div className="modal-backdrop" onMouseDown={()=>setOauthProvider(null)}>
         <div className="oauth-select-modal" onMouseDown={e=>e.stopPropagation()}>
-          <div className="modal-head"><div><div className="eyebrow">{oauthProvider==='vk'?'VK':'INSTAGRAM'}</div><h2>{oauthProvider==='vk'?'Выберите сообщество':'Выберите Instagram-аккаунт'}</h2></div><button className="icon-button" onClick={()=>setOauthProvider(null)}>×</button></div>
+          <div className="modal-head"><div><div className="eyebrow">INSTAGRAM</div><h2>Выберите Instagram-аккаунт</h2></div><button className="icon-button" onClick={()=>setOauthProvider(null)}>×</button></div>
           <div className="oauth-candidate-list">
-            {oauthProvider==='vk'&&vkCandidates.map(group=><button key={group.id} className="oauth-candidate" disabled={busy} onClick={()=>void connectVk(group)}><span>{group.photo_100?<img src={group.photo_100} alt=""/>:<b>VK</b>}</span><span><strong>{group.name}</strong><small>{group.screen_name?'@'+group.screen_name:'ID '+group.id}</small></span></button>)}
-            {oauthProvider==='meta'&&metaCandidates.map(item=><button key={item.instagram_id} className="oauth-candidate" disabled={busy} onClick={()=>void connectInstagram(item)}><span>{item.profile_picture_url?<img src={item.profile_picture_url} alt=""/>:<b>◎</b>}</span><span><strong>{item.instagram_name||item.instagram_username||'Instagram'}</strong><small>@{item.instagram_username||item.instagram_id}</small></span></button>)}
-            {oauthProvider==='vk'&&!vkCandidates.length&&<div className="empty small-empty">VK не вернул доступных сообществ.</div>}
-            {oauthProvider==='meta'&&!metaCandidates.length&&<div className="empty small-empty">Meta не нашла привязанный профессиональный Instagram.</div>}
+            {metaCandidates.map(item=><button key={item.instagram_id} className="oauth-candidate" disabled={busy} onClick={()=>void connectInstagram(item)}><span>{item.profile_picture_url?<img src={item.profile_picture_url} alt=""/>:<b>◎</b>}</span><span><strong>{item.instagram_name||item.instagram_username||'Instagram'}</strong><small>@{item.instagram_username||item.instagram_id}</small></span></button>)}
+            {!metaCandidates.length&&<div className="empty small-empty">Meta не нашла привязанный профессиональный Instagram.</div>}
           </div>
         </div>
       </div>}
